@@ -18,12 +18,6 @@ static const char* termux_rewrite_executable(const char* filename, char* buffer,
 	return filename;
 }
 
-// Examples:
-// [1] "#!/bin/sh" should exec "$PREFIX" without argument.
-// [2] "#! /bin/sh" should exec "$PREFIX" without argument.
-// [3] "#!/bin/sh a" should exec "$PREFIX" with single argument "a"
-// [4] "#! /bin/sh   a    " should exec "$PREFIX" with single argument "a"
-// [5] "#! /bin/sh   a  b " should exec "$PREFIX" with single argument "a  b"
 int execve(const char* filename, char* const* argv, char *const envp[])
 {
 	int fd = -1;
