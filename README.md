@@ -1,17 +1,17 @@
 # termux-exec
-A `execve()` wrapper to fix problem with shebangs when running in Termux
+A `execve()` wrapper to fix problem with shebangs when running in Termux.
 
 # Problem
 A lot of Linux software is written with the assumption that `/bin/sh`, `/usr/bin/env`
-and similar file exists. This is not the case on Android where neither `/bin/` or `/usr/`
+and similar file exists. This is not the case on Android where neither `/bin/` nor `/usr/`
 exists.
 
-When building packages for Termux those hard-coded assumptions are patched away, but this
-does not help with installing scripts and programs during runtime.
+When building packages for Termux those hard-coded assumptions are patched away - but this
+does not help with installing scripts and programs from other sources than Termux packages.
 
 # Solution
 Create an `execve()` wrapper that rewrites calls to execute files under `/bin/` and `/usr/bin`
-into the matching Termux executables under `$PREFIX/bin/` and injecat that into processes
+into the matching Termux executables under `$PREFIX/bin/` and inject that into processes
 using `LD_PRELOAD`.
 
 # How to install
