@@ -9,7 +9,7 @@ for f in tests/*.sh; do
 	ACTUAL_FILE=$f-actual
 
 	rm -f $ACTUAL_FILE
-	$f $ACTUAL_FILE > $ACTUAL_FILE
+	$f myarg1 myarg2 > $ACTUAL_FILE
 
 	if cmp --silent $ACTUAL_FILE $EXPECTED_FILE; then
 		printf " OK\n"

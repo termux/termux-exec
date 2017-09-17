@@ -5,7 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 
-const char* termux_rewrite_executable(const char* filename, char* buffer, int buffer_len)
+static const char* termux_rewrite_executable(const char* filename, char* buffer, int buffer_len)
 {
 	strcpy(buffer, "/data/data/com.termux/files/usr/bin/");
 	char* bin_match = strstr(filename, "/bin/");
@@ -27,6 +27,7 @@ const char* termux_rewrite_executable(const char* filename, char* buffer, int bu
 int execve(const char* filename, char* const* argv, char *const envp[])
 {
 	int fd = -1;
+	const char** new_argv = NULL;
 
 	char filename_buffer[512];
 	filename = termux_rewrite_executable(filename, filename_buffer, sizeof(filename_buffer));
@@ -62,7 +63,7 @@ int execve(const char* filename, char* const* argv, char *const envp[])
 		*whitespace_pos = 0;
 
 		// Find start of argument:
-		arg = whitespace_pos + 1;;
+		arg = whitespace_pos + 1;
 		while (*arg != 0 && *arg == ' ') arg++;
 		if (arg == newline_location) {
 			// Only whitespace after interpreter.
@@ -70,20 +71,22 @@ int execve(const char* filename, char* const* argv, char *const envp[])
 		}
 	}
 
-	const char* new_argv[4];
-	new_argv[0] = basename(interpreter);
-
 	char interp_buf[512];
 	const char* new_interpreter = termux_rewrite_executable(interpreter, interp_buf, sizeof(interp_buf));
+	if (new_interpreter == interpreter) goto final;
 
-	if (arg) {
-		new_argv[1] = arg;
-		new_argv[2] = filename;
-		new_argv[3] = NULL;
-	} else {
-		new_argv[1] = filename;
-		new_argv[2] = NULL;
-	}
+	int orig_argv_count = 0;
+	while (argv[orig_argv_count] != NULL) orig_argv_count++;
+
+	new_argv = malloc(sizeof(char*) * (4 + orig_argv_count));
+
+	int current_argc = 0;
+	new_argv[current_argc++] = basename(interpreter);
+	if (arg) new_argv[current_argc++] = arg;
+	new_argv[current_argc++] = filename;
+	int i = 1;
+	while (orig_argv_count-- > 1) new_argv[current_argc++] = argv[i++];
+	new_argv[current_argc] = NULL;
 
 	filename = new_interpreter;
 	argv = (char**) new_argv;
@@ -91,5 +94,7 @@ int execve(const char* filename, char* const* argv, char *const envp[])
 final:
 	if (fd != -1) close(fd);
 	int (*real_execve)(const char*, char *const[], char *const[]) = dlsym(RTLD_NEXT, "execve");
-	return real_execve(filename, argv, envp);
+	int ret = real_execve(filename, argv, envp);
+	free(new_argv);
+	return ret;
 }
