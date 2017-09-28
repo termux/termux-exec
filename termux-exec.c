@@ -26,6 +26,9 @@ int execve(const char* filename, char* const* argv, char *const envp[])
 	char filename_buffer[512];
 	filename = termux_rewrite_executable(filename, filename_buffer, sizeof(filename_buffer));
 
+	// Error out if the file is not executable:
+	if (access(filename, X_OK) != 0) goto final;
+
 	fd = open(filename, O_RDONLY);
 	if (fd == -1) goto final;
 
