@@ -1,4 +1,5 @@
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
