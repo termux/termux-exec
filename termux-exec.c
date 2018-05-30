@@ -1,5 +1,4 @@
 #include <dlfcn.h>
-#include <fcntl.h>
 #include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,8 +7,14 @@
 
 static const char* termux_rewrite_executable(const char* filename, char* buffer, int buffer_len)
 {
+	
 	strcpy(buffer, "/data/data/com.termux/files/usr/bin/");
 	char* bin_match = strstr(filename, "/bin/");
+	if ( ( strncmp(filename, "/system/bin/", 12) == 0 ) && strncmp(filename, "/system/bin/sh", 14) != 0)  {
+                unsetenv("LD_LIBRARY_PATH");
+
+        }
+
 	if (bin_match == filename || bin_match == (filename + 4)) {
 		// We have either found "/bin/" at the start of the string or at
 		// "/xxx/bin/". Take the path after that.
