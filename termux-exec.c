@@ -30,8 +30,14 @@
 # error "unknown arch"
 #endif
 
+#define starts_with(value, str) !strncmp(value, str, sizeof(str) - 1)
+
 static const char* termux_rewrite_executable(const char* filename, char* buffer, int buffer_len)
 {
+	if (starts_with(filename, TERMUX_BASE_DIR) ||
+			starts_with(filename, "/system/"))
+		return filename;
+
 	strcpy(buffer, TERMUX_PREFIX "/bin/");
 	char* bin_match = strstr(filename, "/bin/");
 	if (bin_match == filename || bin_match == (filename + 4)) {
@@ -66,7 +72,7 @@ static char*const * remove_ld_preload(char*const * envp)
 	return envp;
 }
 
-int execve(const char* filename, char* const* argv, char *const envp[])
+int execve(const char* filename, char* const* argv, char* const* envp)
 {
 	bool android_10_debug = getenv("TERMUX_ANDROID10_DEBUG") != NULL;
 	if (android_10_debug) {
@@ -80,6 +86,7 @@ int execve(const char* filename, char* const* argv, char *const envp[])
 
 	int fd = -1;
 	const char** new_argv = NULL;
+	const char** new_envp = NULL;
 
 	char filename_buffer[512];
 	filename = termux_rewrite_executable(filename, filename_buffer, sizeof(filename_buffer));
@@ -89,6 +96,31 @@ int execve(const char* filename, char* const* argv, char *const envp[])
 
 	fd = open(filename, O_RDONLY);
 	if (fd == -1) goto final;
+
+	// LD_LIBRARY_PATH messes up system programs with CANNOT_LINK_EXECUTABLE errors.
+	// If we remove.it, this problem is solved.
+	// /system/bin/sh is fine, it only uses libc++, libc, and libdl.
+	if (starts_with(filename, "/system/") && strcmp(filename, "/system/bin/sh") != 0) {
+
+		size_t envp_count = 0;
+		while (envp[envp_count] != NULL)
+			envp_count++;
+
+		new_envp = malloc((envp_count + 1) * sizeof(char*));
+
+		size_t pos = 0;
+		for (size_t i = 0; i < envp_count; i++) {
+			// Skip it if it is LD_LIBRARY_PATH or LD_PRELOAD
+			if (!starts_with(envp[i], "LD_LIBRARY_PATH=") &&
+					!starts_with(envp[i], "LD_PRELOAD="))
+				new_envp[pos++] = (const char*)envp[i];
+		}
+		new_envp[pos] = NULL;
+
+		envp = (char**)new_envp;
+		// Not.sure if needed.
+		environ = (char**)new_envp;
+	}
 
 	// execve(2): "A maximum line length of 127 characters is allowed
 	// for the first line in a #! executable shell script."
@@ -159,7 +191,7 @@ int execve(const char* filename, char* const* argv, char *const envp[])
 
 final:
 	if (fd != -1) close(fd);
-	int (*real_execve)(const char*, char *const[], char *const[]) = dlsym(RTLD_NEXT, "execve");
+	int (*real_execve)(const char*, char* const[], char* const[]) = dlsym(RTLD_NEXT, "execve");
 
 	bool android_10_wrapping = getenv("TERMUX_ANDROID10") != NULL;
 	if (android_10_wrapping) {
@@ -201,5 +233,6 @@ final:
 
 	int ret = real_execve(filename, argv, envp);
 	free(new_argv);
+	free(new_envp);
 	return ret;
 }
