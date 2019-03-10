@@ -1,7 +1,7 @@
 CFLAGS += -Wall -Wextra -Werror -Oz
 
 libtermux-exec.so: termux-exec.c
-	$(CC) $(CFLAGS) termux-exec.c -shared -fPIC -o libtermux-exec.so
+	$(CC) $(CFLAGS) $(LDFLAGS) termux-exec.c -shared -fPIC -o libtermux-exec.so
 
 install: libtermux-exec.so
 	install libtermux-exec.so $(PREFIX)/lib/libtermux-exec.so
