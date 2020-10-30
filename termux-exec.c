@@ -9,14 +9,22 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifndef TERMUX_BASE_DIR
+# define TERMUX_BASE_DIR "/data/data/com.termux/files"
+#endif
+
+#ifndef TERMUX_PREFIX
+# define TERMUX_PREFIX "/data/data/com.termux/files/usr"
+#endif
+
 static const char* termux_rewrite_executable(const char* filename, char* buffer, int buffer_len)
 {
-	strcpy(buffer, "/data/data/com.termux/files/usr/bin/");
+	strcpy(buffer, TERMUX_PREFIX "/bin/");
 	char* bin_match = strstr(filename, "/bin/");
 	if (bin_match == filename || bin_match == (filename + 4)) {
 		// We have either found "/bin/" at the start of the string or at
 		// "/xxx/bin/". Take the path after that.
-		strncpy(buffer + 36, bin_match + 5, buffer_len - 37);
+		strncpy(buffer + sizeof(TERMUX_PREFIX "/bin/"), bin_match + 5, buffer_len - sizeof(TERMUX_PREFIX "/bin/") - 1);
 		filename = buffer;
 	}
 	return filename;
@@ -111,7 +119,7 @@ final:
 		char realpath_buffer[PATH_MAX];
 		bool realpath_ok = realpath(filename, realpath_buffer) != NULL;
 		if (realpath_ok) {
-			bool wrap_in_proot = (strstr(realpath_buffer, "/data/data/com.termux/files") != NULL);
+			bool wrap_in_proot = (strstr(realpath_buffer, TERMUX_BASE_DIR) != NULL);
 			if (android_10_debug) {
 				printf("termux-exec: realpath(\"%s\") = \"%s\", wrapping=%s\n", filename, realpath_buffer, wrap_in_proot ? "yes" : "no");
 			}
@@ -120,7 +128,7 @@ final:
 				while (argv[orig_argv_count] != NULL) orig_argv_count++;
 
 				new_argv = malloc(sizeof(char*) * (2 + orig_argv_count));
-				filename = "/data/data/com.termux/files/usr/bin/proot";
+				filename = TERMUX_PREFIX "/bin/proot";
 				new_argv[0] = "proot";
 				for (int i = 0; i < orig_argv_count; i++) {
 					new_argv[i + 1] = argv[i];
