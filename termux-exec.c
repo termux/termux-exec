@@ -24,7 +24,7 @@ static const char* termux_rewrite_executable(const char* filename, char* buffer,
 	if (bin_match == filename || bin_match == (filename + 4)) {
 		// We have either found "/bin/" at the start of the string or at
 		// "/xxx/bin/". Take the path after that.
-		strncpy(buffer + sizeof(TERMUX_PREFIX "/bin/"), bin_match + 5, buffer_len - sizeof(TERMUX_PREFIX "/bin/") - 1);
+		strncpy(buffer + sizeof(TERMUX_PREFIX "/bin/") - 1, bin_match + 5, buffer_len - sizeof(TERMUX_PREFIX "/bin/"));
 		filename = buffer;
 	}
 	return filename;
