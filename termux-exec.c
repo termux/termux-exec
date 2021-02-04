@@ -98,7 +98,7 @@ int execve(const char* filename, char* const* argv, char *const envp[])
 	// If we are executing a non-native ELF file, unset LD_PRELOAD.
 	// This avoids CANNOT LINK EXECUTABLE errors when running 32-bit code
 	// on 64-bit.
-	if (read_bytes >= 20 && !memcmp(header, "\x7f\x45\x4c\x46", 4)) {
+	if (read_bytes >= 20 && !memcmp(header, ELFMAG, SELFMAG)) {
 		Elf32_Ehdr* ehdr = (Elf32_Ehdr*)header;
 		if (ehdr->e_machine != EM_NATIVE) {
 			envp = remove_ld_preload(envp);
