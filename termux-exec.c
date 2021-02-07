@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <elf.h>
 
 #ifndef TERMUX_BASE_DIR
 # define TERMUX_BASE_DIR "/data/data/com.termux/files"
@@ -15,6 +16,18 @@
 
 #ifndef TERMUX_PREFIX
 # define TERMUX_PREFIX "/data/data/com.termux/files/usr"
+#endif
+
+#ifdef __aarch64__
+# define EM_NATIVE EM_AARCH64
+#elif defined(__arm__) || defined(__thumb__)
+# define EM_NATIVE EM_ARM
+#elif defined(__x86_64__)
+# define EM_NATIVE EM_X86_64
+#elif defined(__i386__)
+# define EM_NATIVE EM_386
+#else
+# error "unknown arch"
 #endif
 
 static const char* termux_rewrite_executable(const char* filename, char* buffer, int buffer_len)
@@ -28,6 +41,29 @@ static const char* termux_rewrite_executable(const char* filename, char* buffer,
 		filename = buffer;
 	}
 	return filename;
+}
+
+static char*const * remove_ld_preload(char*const * envp)
+{
+	for (int i = 0; envp[i] != NULL; i++) {
+		if (strstr(envp[i], "LD_PRELOAD=") == envp[i]) {
+			int env_length = 0;
+			while (envp[env_length] != NULL) env_length++;
+
+			char** new_envp = malloc(sizeof(char*) * env_length);
+			int new_envp_idx = 0;
+			int old_envp_idx = 0;
+			while (old_envp_idx < env_length) {
+				if (old_envp_idx != i) {
+					new_envp[new_envp_idx++] = envp[old_envp_idx];
+				}
+				old_envp_idx++;
+			}
+			new_envp[env_length] = NULL;
+			return new_envp;
+		}
+	}
+	return envp;
 }
 
 int execve(const char* filename, char* const* argv, char *const envp[])
@@ -56,12 +92,23 @@ int execve(const char* filename, char* const* argv, char *const envp[])
 
 	// execve(2): "A maximum line length of 127 characters is allowed
 	// for the first line in a #! executable shell script."
-	char shebang[128];
-	ssize_t read_bytes = read(fd, shebang, sizeof(shebang) - 1);
-	if (read_bytes < 5 || !(shebang[0] == '#' && shebang[1] == '!')) goto final;
+	char header[128];
+	ssize_t read_bytes = read(fd, header, sizeof(header) - 1);
 
-	shebang[read_bytes] = 0;
-	char* newline_location = strchr(shebang, '\n');
+	// If we are executing a non-native ELF file, unset LD_PRELOAD.
+	// This avoids CANNOT LINK EXECUTABLE errors when running 32-bit code
+	// on 64-bit.
+	if (read_bytes >= 20 && !memcmp(header, ELFMAG, SELFMAG)) {
+		Elf32_Ehdr* ehdr = (Elf32_Ehdr*)header;
+		if (ehdr->e_machine != EM_NATIVE) {
+			envp = remove_ld_preload(envp);
+		}
+		goto final;
+	}
+	if (read_bytes < 5 || !(header[0] == '#' && header[1] == '!')) goto final;
+
+	header[read_bytes] = 0;
+	char* newline_location = strchr(header, '\n');
 	if (newline_location == NULL) goto final;
 
 	// Strip whitespace at end of shebang:
@@ -71,7 +118,7 @@ int execve(const char* filename, char* const* argv, char *const envp[])
 	*newline_location = 0;
 
 	// Skip whitespace to find interpreter start:
-	char* interpreter = shebang + 2;
+	char* interpreter = header + 2;
 	while (*interpreter == ' ') interpreter++;
 	if (interpreter == newline_location) goto final;
 
@@ -135,27 +182,8 @@ final:
 				}
 				new_argv[orig_argv_count + 1] = NULL;
 				argv = (char**) new_argv;
-
-				// Remove LD_PRELOAD environment variable when wrapping in proot:
-				for (int i = 0; envp[i] != NULL; i++) {
-					if (strstr(envp[i], "LD_PRELOAD=") == envp[i]) {
-						int env_length = 0;
-						while (envp[env_length] != NULL) env_length++;
-
-						char** new_envp = malloc(sizeof(char*) * env_length);
-						int new_envp_idx = 0;
-						int old_envp_idx = 0;
-						while (old_envp_idx < env_length) {
-							if (old_envp_idx != i) {
-								new_envp[new_envp_idx++] = envp[old_envp_idx];
-							}
-							old_envp_idx++;
-						}
-						new_envp[env_length] = NULL;
-						envp = new_envp;
-						break;
-					}
-				}
+				// Remove LD_PRELOAD environment variable when wrapping in proot
+				envp = remove_ld_preload(envp);
 			}
 		} else {
 			errno = 0;
