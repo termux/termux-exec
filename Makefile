@@ -9,7 +9,7 @@ install: libtermux-exec.so
 	install libtermux-exec.so $(DESTDIR)$(PREFIX)/lib/libtermux-exec.so
 
 uninstall:
-	rm -f $(PREFIX)/lib/libtermux-exec.so
+	rm -f $(DESTDIR)$(PREFIX)/lib/libtermux-exec.so
 
 test: libtermux-exec.so
 	@LD_PRELOAD=${CURDIR}/libtermux-exec.so ./run-tests.sh
