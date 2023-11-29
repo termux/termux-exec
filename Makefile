@@ -3,7 +3,7 @@ TERMUX_BASE_DIR := /data/data/com.termux/files
 CFLAGS += -Wall -Wextra -Werror -Oz
 
 libtermux-exec.so: termux-exec.c
-	$(CC) $(CFLAGS) $(LDFLAGS) termux-exec.c -DTERMUX_PREFIX=\"$(TERMUX_PREFIX)\" -DTERMUX_BASE_DIR=\"$(TERMUX_BASE_DIR)\" -shared -fPIC -o libtermux-exec.so
+	$(CC) $(CFLAGS) $(LDFLAGS) src/termux-exec.c -DTERMUX_PREFIX=\"$(TERMUX_PREFIX)\" -DTERMUX_BASE_DIR=\"$(TERMUX_BASE_DIR)\" -shared -fPIC -o libtermux-exec.so
 
 install: libtermux-exec.so
 	install libtermux-exec.so $(DESTDIR)$(PREFIX)/lib/libtermux-exec.so
