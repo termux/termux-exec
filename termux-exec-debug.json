@@ -1,0 +1,17 @@
+{
+    "control": {
+        "Package": "termux-exec",
+        "Version": "9:9.8",
+        "Architecture": "aarch64",
+        "Maintainer": "Termux developers",
+        "Description": "Development version of termux-exec"
+    },
+
+    "installation_prefix": "/data/data/com.termux/files/usr",
+
+    "data_files": {
+        "lib/libtermux-exec.so": {
+            "source": "libtermux-exec.so"
+        }
+    }
+}
