@@ -1,1 +1,0 @@
-./run-tests.sh: line 12: tests/not-executable.sh: Permission denied

@@ -7,11 +7,11 @@
         "Description": "Development version of termux-exec"
     },
 
-    "installation_prefix": "/data/data/com.termux/files/usr",
+    "installation_prefix": "@TERMUX__PREFIX@",
 
     "data_files": {
         "lib/libtermux-exec.so": {
-            "source": "libtermux-exec.so"
+            "source": "build/lib/libtermux-exec.so"
         }
     }
 }
