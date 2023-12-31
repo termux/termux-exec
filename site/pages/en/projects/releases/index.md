@@ -50,6 +50,10 @@ Open a release to view its release notes and/or changelogs. Changelogs are gener
 
   - [`v1.0`](1/v1.0.md)
 
+### `v2`
+
+  - [`v2.0.0`](2/v2.0.0.md)
+
 ---
 
 &nbsp;

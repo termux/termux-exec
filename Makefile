@@ -1,4 +1,4 @@
-export TERMUX_EXEC__VERSION ?= 1.0
+export TERMUX_EXEC__VERSION ?= 2.0.0
 export TERMUX_EXEC__INSTALL_PREFIX ?= $(DESTDIR)$(PREFIX)
 export TERMUX__NAME ?= Termux# Default value: `Termux`
 export TERMUX_APP__PACKAGE_NAME ?= com.termux# Default value: `com.termux`
