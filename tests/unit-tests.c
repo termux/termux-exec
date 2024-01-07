@@ -1156,11 +1156,23 @@ void testIsPathUnderTermuxRootfsDir__Basic() {
     if (access(TERMUX_BIN_DIR "/sh", X_OK) == 0) {
         int fd = open(TERMUX_BIN_DIR "/sh", 0);
         state__ATrue(fd != -1);
+
+        char real_path[PATH_MAX];
+        ssize_t length = readlink(TERMUX_BIN_DIR "/sh", real_path, sizeof(real_path) - 1);
+        state__ATrue(length >= 0);
+        real_path[length] = '\0';
+
+        // If not running on device, then `sh` would be a symlink to `/bin/sh` to `/usr/bin/dash`.
+        bool is_not_on_device = string_starts_with(real_path, "/usr/bin/") || string_starts_with(real_path, "/bin/");
+
         char proc_fd_path[40];
         snprintf(proc_fd_path, sizeof(proc_fd_path), "/proc/self/fd/%d", fd);
-        iputrd__ABool(true, proc_fd_path, TERMUX__ROOTFS);
+        iputrd__AInt(is_not_on_device ? 1 : 0, proc_fd_path, TERMUX__ROOTFS);
         close(fd);
+    } else {
+        errno = 0;
     }
+
 
     if (access("/system/bin/sh", X_OK) == 0) {
         int fd = open("/system/bin/sh", 0);
@@ -1169,16 +1181,21 @@ void testIsPathUnderTermuxRootfsDir__Basic() {
         snprintf(proc_fd_path, sizeof(proc_fd_path), "/proc/self/fd/%d", fd);
         iputrd__ABool(termux_rootfs_is_rootfs || termux_rootfs_is_system, proc_fd_path, TERMUX__ROOTFS);
         close(fd);
+    } else {
+        errno = 0;
     }
 
-    {
-    // S_ISREG should fail in get_fd_realpath()
-    int fd = open(TERMUX_BIN_DIR, 0);
-    state__ATrue(fd != -1);
-    char proc_fd_path[40];
-    snprintf(proc_fd_path, sizeof(proc_fd_path), "/proc/self/fd/%d", fd);
-    iputrd__AInt(-1, proc_fd_path, TERMUX__ROOTFS);
-    close(fd);
+
+    if (access(TERMUX_BIN_DIR, X_OK) == 0) {
+        // S_ISREG should fail in get_fd_realpath()
+        int fd = open(TERMUX_BIN_DIR, 0);
+        state__ATrue(fd != -1);
+        char proc_fd_path[40];
+        snprintf(proc_fd_path, sizeof(proc_fd_path), "/proc/self/fd/%d", fd);
+        iputrd__AInt(-1, proc_fd_path, TERMUX__ROOTFS);
+        close(fd);
+    } else {
+        errno = 0;
     }
 }
 

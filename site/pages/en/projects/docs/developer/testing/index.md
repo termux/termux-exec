@@ -47,19 +47,22 @@ Usage:
     termux-exec-tests [command_options] command
 
 Available commands:
-    unit                 Run unit tests.
-    runtime              Run runtime on-device tests.
-    all                  Run all tests.
+    unit                     Run unit tests.
+    runtime                  Run runtime on-device tests.
+    all                      Run all tests.
 
 Available command_options:
-    [ -h | --help ]      Display this help screen.
-    [ -f ]               Use fsanitize binaries for AddressSanitizer.
-    [ -l ]               Detect memory leaks with LeakSanitizer.
-                         Requires '-f` to be passed.
-    [ --no-clean ]       Do not clean test files on failure.
-    [ --only-ld-tests ]  Only run LD_PRELOAD termux-exec runtime tests.
-    [ -q | -quiet ]      Set log level to 'OFF'.
-    [ -v | -vv | -vvv | -vvvvv ]  Set log level to 'DEBUG', 'VERBOSE', `VVERBOSE' and `VVVERBOSE'.
+    [ -h | --help ]          Display this help screen.
+    [ -f ]                   Use fsanitize binaries for AddressSanitizer.
+    [ -l ]                   Detect memory leaks with LeakSanitizer.
+                             Requires '-f` to be passed.
+    [ --ld-preload=<path> ]  The path to 'libtermux-exec.so'.
+    [ --tests-path=<path> ]  The path to installed-tests directory.
+    [ --no-clean ]           Do not clean test files on failure.
+    [ --only-ld-tests ]      Only run LD_PRELOAD termux-exec runtime tests.
+    [ -q | -quiet ]          Set log level to 'OFF'.
+    [ -v | -vv | -vvv | -vvvvv ]  Set log level to 'DEBUG', 'VERBOSE', `VVERBOSE'
+                                  and `VVVERBOSE'.
 ```
 
 ---

@@ -1,4 +1,5 @@
 export TERMUX_EXEC__VERSION ?= 1.0
+export TERMUX_EXEC__INSTALL_PREFIX ?= $(DESTDIR)$(PREFIX)
 export TERMUX__NAME ?= Termux# Default value: `Termux`
 export TERMUX_APP__PACKAGE_NAME ?= com.termux# Default value: `com.termux`
 export TERMUX__ROOTFS ?= /data/data/$(TERMUX_APP__PACKAGE_NAME)/files# Default value: `/data/data/com.termux/files`
@@ -143,27 +144,30 @@ clean:
 	rm -f termux-exec-package.json
 
 install:
-	install build/lib/libtermux-exec.so $(DESTDIR)$(PREFIX)/lib/libtermux-exec.so
+	@echo "Installing in $(TERMUX_EXEC__INSTALL_PREFIX)"
+	install -d $(TERMUX_EXEC__INSTALL_PREFIX)/lib
+	install build/lib/libtermux-exec.so $(TERMUX_EXEC__INSTALL_PREFIX)/lib/libtermux-exec.so
 
 
-	install -d $(DESTDIR)$(PREFIX)/libexec/installed-tests/termux-exec
-	install tests/termux-exec-tests $(DESTDIR)$(PREFIX)/libexec/installed-tests/termux-exec/termux-exec-tests
-	install tests/runtime-script-tests $(DESTDIR)$(PREFIX)/libexec/installed-tests/termux-exec/runtime-script-tests
+	install -d $(TERMUX_EXEC__INSTALL_PREFIX)/libexec/installed-tests/termux-exec
+	install tests/termux-exec-tests $(TERMUX_EXEC__INSTALL_PREFIX)/libexec/installed-tests/termux-exec/termux-exec-tests
+	install tests/runtime-script-tests $(TERMUX_EXEC__INSTALL_PREFIX)/libexec/installed-tests/termux-exec/runtime-script-tests
 
 
-	install $(shell find build/tests -maxdepth 1 -type f) -t $(DESTDIR)$(PREFIX)/libexec/installed-tests/termux-exec
+	install $(shell find build/tests -maxdepth 1 -type f) -t $(TERMUX_EXEC__INSTALL_PREFIX)/libexec/installed-tests/termux-exec
 
 
-	install -d $(DESTDIR)$(PREFIX)/libexec/installed-tests/termux-exec/files
+	install -d $(TERMUX_EXEC__INSTALL_PREFIX)/libexec/installed-tests/termux-exec/files
 
 
-	install -d $(DESTDIR)$(PREFIX)/libexec/installed-tests/termux-exec/files/exec
-	install $(shell find build/tests/files/exec -maxdepth 1 -type f) -t $(DESTDIR)$(PREFIX)/libexec/installed-tests/termux-exec/files/exec
-	find tests/files/exec -maxdepth 1 \( -name '*.sh' -o -name '*.sym' \) -exec cp -a "{}" $(DESTDIR)$(PREFIX)/libexec/installed-tests/termux-exec/files/exec \;
+	install -d $(TERMUX_EXEC__INSTALL_PREFIX)/libexec/installed-tests/termux-exec/files/exec
+	install $(shell find build/tests/files/exec -maxdepth 1 -type f) -t $(TERMUX_EXEC__INSTALL_PREFIX)/libexec/installed-tests/termux-exec/files/exec
+	find tests/files/exec -maxdepth 1 \( -name '*.sh' -o -name '*.sym' \) -exec cp -a "{}" $(TERMUX_EXEC__INSTALL_PREFIX)/libexec/installed-tests/termux-exec/files/exec \;
 
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/lib/libtermux-exec.so
-	rm -rf $(DESTDIR)$(PREFIX)/libexec/installed-tests/termux-exec
+	@echo "Uninstalling from $(TERMUX_EXEC__INSTALL_PREFIX)"
+	rm -f $(TERMUX_EXEC__INSTALL_PREFIX)/lib/libtermux-exec.so
+	rm -rf $(TERMUX_EXEC__INSTALL_PREFIX)/libexec/installed-tests/termux-exec
 
 
 
@@ -173,13 +177,16 @@ deb: all
 
 
 test: all
-	tests/termux-exec-tests --ld-preload="${CURDIR}/build/lib/libtermux-exec.so" -vvv all
-
-test-runtime: all
-	tests/termux-exec-tests --ld-preload="${CURDIR}/build/lib/libtermux-exec.so" -vvv runtime
+	$(MAKE) TERMUX_EXEC__INSTALL_PREFIX=install install
+	tests/termux-exec-tests --ld-preload="install/lib/libtermux-exec.so" --tests-path="install/libexec/installed-tests/termux-exec" -vvv all
 
 test-unit: all
-	tests/termux-exec-tests --ld-preload="${CURDIR}/build/lib/libtermux-exec.so" -vvv unit
+	$(MAKE) TERMUX_EXEC__INSTALL_PREFIX=install install
+	bash tests/termux-exec-tests --tests-path="install/libexec/installed-tests/termux-exec" -vvv unit
+
+test-runtime: all
+	$(MAKE) TERMUX_EXEC__INSTALL_PREFIX=install install
+	tests/termux-exec-tests --ld-preload="install/lib/libtermux-exec.so" --tests-path="install/libexec/installed-tests/termux-exec" -vvv runtime
 
 
 
@@ -192,4 +199,4 @@ check:
 
 
 
-.PHONY: all clean install uninstall deb test test-runtime test-unit format check
+.PHONY: all clean install uninstall deb test test-unit test-runtime format check

@@ -1,12 +1,12 @@
 #!@TERMUX__PREFIX@/bin/env bash
 
-SCRIPT_LOG_LEVEL=1 # Default to 1 (OFF=0, NORMAL=1, DEBUG=2, VERBOSE=3, VVERBOSE=4 and VVVERBOSE=5)
-COMMAND_TYPE="" # Default to ""
-NOOP_COMMAND=0 # Default to 0
-DETECT_LEAKS=0 # Default to 0
-NO_CLEAN=0 # Default to 0
-USE_FSANITIZE_BUILDS=0 # Default to 0
-ONLY_LD_TESTS=0 # Default to 0
+SCRIPT_LOG_LEVEL=1 # Default: `1` (OFF=0, NORMAL=1, DEBUG=2, VERBOSE=3, VVERBOSE=4 and VVVERBOSE=5)
+COMMAND_TYPE="" # Default: ``
+NOOP_COMMAND=0 # Default: `0`
+DETECT_LEAKS=0 # Default: `0`
+NO_CLEAN=0 # Default: `0`
+USE_FSANITIZE_BUILDS=0 # Default: `0`
+ONLY_LD_TESTS=0 # Default: `0`
 NL=$'\n'
 
 VALID_NUMBER_REGEX='^[0-9]+$'
@@ -27,6 +27,9 @@ main() {
 
     local return_value
 
+    local RUN_UNIT_TESTS=0
+    local RUN_RUNTIME_TESTS=0
+
     # Process the command arguments passed if received
     if [ $# -ne 0 ]; then
         process_arguments "$@" || return $?
@@ -45,13 +48,13 @@ main() {
         return 1
     fi
 
-    if [[ ! -d "$TMPDIR" ]]; then
-        log_errors "The TMPDIR \"$TMPDIR\" is either not set or not a directory"
-        return 1
-    fi
-
 
     log 1 "Running tests"
+
+
+    [[ ",unit,all," == *",$COMMAND_TYPE,"* ]] && RUN_UNIT_TESTS=1
+    [[ ",runtime,all," == *",$COMMAND_TYPE,"* ]] && RUN_RUNTIME_TESTS=1
+
 
     export @TERMUX_ENV__S_TERMUX_EXEC_TESTS@LOG_LEVEL="$SCRIPT_LOG_LEVEL"
     # shellcheck disable=SC2170
@@ -61,51 +64,63 @@ main() {
     fi
 
 
-    # shellcheck disable=SC2276
-    case "${@TERMUX_ENV__S_TERMUX@USER_ID:-}" in ''|*[!0-9]*|0[0-9]*) @TERMUX_ENV__S_TERMUX@USER_ID=0;; esac
+    # Setup variables for runtime tests
+    if [[ "$RUN_RUNTIME_TESTS" == "1" ]]; then
+        # shellcheck disable=SC2276
+        case "${@TERMUX_ENV__S_TERMUX@USER_ID:-}" in ''|*[!0-9]*|0[0-9]*) @TERMUX_ENV__S_TERMUX@USER_ID=0;; esac
 
 
-    TERMUX_EXEC_TESTS__UID="$(id -u)"
-    return_value=$?
-    if [ $return_value -ne 0 ]; then
-        log_errors "Failed to get uid"
-        return $return_value
+        TERMUX_EXEC_TESTS__UID="$(id -u)"
+        return_value=$?
+        if [ $return_value -ne 0 ]; then
+            log_errors "Failed to get uid"
+            return $return_value
+        fi
+
+
+        ANDROID__BUILD_VERSION_SDK="$(getprop "ro.build.version.sdk")"
+        if [[ ! "$ANDROID__BUILD_VERSION_SDK" =~ $VALID_NUMBER_REGEX ]]; then
+            log_errors "Failed to get android build version sdk with getprop"
+            return 1
+        fi
+
+
+        if [[ ! -d "$TMPDIR" ]]; then
+            log_errors "The TMPDIR \"$TMPDIR\" is either not set or not a directory"
+            return 1
+        fi
+
+
+        TERMUX_EXEC_TESTS__TMPDIR_PATH="$TMPDIR/termux-exec"
+
+        # Ensure test directory is clean and does not contain files from previous run
+        rm -rf "$TERMUX_EXEC_TESTS__TMPDIR_PATH" || return $?
+        mkdir -p "$TERMUX_EXEC_TESTS__TMPDIR_PATH" || return $?
     fi
 
 
-    ANDROID__BUILD_VERSION_SDK="$(getprop "ro.build.version.sdk")"
-    if [[ ! "$ANDROID__BUILD_VERSION_SDK" =~ $VALID_NUMBER_REGEX ]]; then
-        log_errors "Failed to get android build version sdk with getprop"
-        return 1
-    fi
-
-
-    TERMUX_EXEC_TESTS__TMPDIR_PATH="$TMPDIR/termux-exec"
-
-    # Ensure test directory is clean and does not contain files from previous run
-    rm -rf "$TERMUX_EXEC_TESTS__TMPDIR_PATH" || return $?
-    mkdir -p "$TERMUX_EXEC_TESTS__TMPDIR_PATH" || return $?
-
-
-    if [[ ",unit,all," == *",$COMMAND_TYPE,"* ]]; then
+    # Run unit tests
+    if [[ "$RUN_UNIT_TESTS" == "1" ]]; then
         run_unit_tests
         return_value=$?
         if [ $return_value -ne 0 ]; then
-            [[ "$NO_CLEAN" != "1" ]] && rm -rf "$TERMUX_EXEC_TESTS__TMPDIR_PATH"
+            [[ -n "$TERMUX_EXEC_TESTS__TMPDIR_PATH" ]] && [[ "$NO_CLEAN" != "1" ]] && rm -rf "$TERMUX_EXEC_TESTS__TMPDIR_PATH"
             return $return_value
         fi
     fi
 
-    if [[ ",runtime,all," == *",$COMMAND_TYPE,"* ]]; then
+
+    # Run runtime tests
+    if [[ "$RUN_RUNTIME_TESTS" == "1" ]]; then
         run_runtime_tests
         return_value=$?
         if [ $return_value -ne 0 ]; then
             [[ "$NO_CLEAN" != "1" ]] && rm -rf "$TERMUX_EXEC_TESTS__TMPDIR_PATH"
             return $return_value
         fi
-    fi
 
-    rm -rf "$TERMUX_EXEC_TESTS__TMPDIR_PATH"
+        rm -rf "$TERMUX_EXEC_TESTS__TMPDIR_PATH"
+    fi
 
     log 1 "All tests successful"
 
@@ -260,6 +275,13 @@ process_arguments() {
                         log_errors "No parameters set for option: '--${OPTARG%=*}'"
                         return 1
                         ;;
+                    tests-path=?*)
+                        export TERMUX_EXEC__TESTS_PATH="$arg"
+                        ;;
+                    tests-path | tests-path=)
+                        log_errors "No parameters set for option: '--${OPTARG%=*}'"
+                        return 1
+                        ;;
                     '' ) # "--" terminates argument processing to support non-options that start with dashes
                         break
                         ;;
@@ -310,26 +332,28 @@ process_arguments() {
 show_help() {
 
     cat <<'HELP_EOF'
-
 termux-exec-tests is a wrapper script for testing termux-exec.
 
 Usage:
     termux-exec-tests [command_options] command
 
 Available commands:
-    unit                 Run unit tests.
-    runtime              Run runtime on-device tests.
-    all                  Run all tests.
+    unit                     Run unit tests.
+    runtime                  Run runtime on-device tests.
+    all                      Run all tests.
 
 Available command_options:
-    [ -h | --help ]      Display this help screen.
-    [ -f ]               Use fsanitize binaries for AddressSanitizer.
-    [ -l ]               Detect memory leaks with LeakSanitizer.
-                         Requires '-f` to be passed.
-    [ --no-clean ]       Do not clean test files on failure.
-    [ --only-ld-tests ]  Only run LD_PRELOAD termux-exec runtime tests.
-    [ -q | -quiet ]      Set log level to 'OFF'.
-    [ -v | -vv | -vvv | -vvvvv ]  Set log level to 'DEBUG', 'VERBOSE', `VVERBOSE' and `VVVERBOSE'.
+    [ -h | --help ]          Display this help screen.
+    [ -f ]                   Use fsanitize binaries for AddressSanitizer.
+    [ -l ]                   Detect memory leaks with LeakSanitizer.
+                             Requires '-f` to be passed.
+    [ --ld-preload=<path> ]  The path to 'libtermux-exec.so'.
+    [ --tests-path=<path> ]  The path to installed-tests directory.
+    [ --no-clean ]           Do not clean test files on failure.
+    [ --only-ld-tests ]      Only run LD_PRELOAD termux-exec runtime tests.
+    [ -q | -quiet ]          Set log level to 'OFF'.
+    [ -v | -vv | -vvv | -vvvvv ]  Set log level to 'DEBUG', 'VERBOSE', `VVERBOSE'
+                                  and `VVVERBOSE'.
 
 HELP_EOF
 
