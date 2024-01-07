@@ -1,3 +1,7 @@
 *.so
 *.o
 *-actual
+*.swo
+*.swp
+*.deb
+test-binary

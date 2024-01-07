@@ -1,0 +1,776 @@
+#!@TERMUX__PREFIX@/bin/env bash
+
+runExecTests() {
+
+    log 2 "runExecTests()"
+
+    # Setup temp directory for exec tests
+    TERMUX_EXEC_TESTS__EXEC_TMPDIR_PATH="$TERMUX_EXEC_TESTS__TMPDIR_PATH/exec"
+    mkdir -p "$TERMUX_EXEC_TESTS__EXEC_TMPDIR_PATH" || return $?
+
+    SCRIPT_TEST_FILE_NAME="test-script"
+    SCRIPT_TEST_FILE_PATH="$TERMUX_EXEC_TESTS__EXEC_TMPDIR_PATH/$SCRIPT_TEST_FILE_NAME"
+
+    testExec__Basic || return $?
+    testExec__Interpreter || return $?
+    testExec__SingleAndDoubleDotExecutablePaths || return $?
+    testExec__SingleAndDoubleDotInterpreterPaths || return $?
+    testExec__Shell || return $?
+
+    [[ "$ONLY_LD_TESTS" == "1" ]] && return 0
+
+    testExec__AndroidTools || return $?
+    testExec__TermuxTools || return $?
+    testExec__TermuxAm || return $?
+    testExec__TermuxAmSocket || return $?
+    testExec__TermuxApi || return $?
+
+    return 0
+
+}
+
+
+
+testExec__Basic() {
+
+    log 3 "testExec__Basic()"
+
+    run_script_exec_test "not-executable" \
+        "#!/bin/bash${NL}echo hello" 0 \
+        "" "." \
+        126 "^.*: $SCRIPT_TEST_FILE_PATH: Permission denied$" || return $?
+
+    run_script_exec_test "is-executable" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "usr-bin-env" \
+        "#!/usr/bin/env bash${NL}echo hello-user-bin-env" 1 \
+        "" "." \
+        0 "^hello-user-bin-env$" || return $?
+
+    run_script_exec_test "termux-bin-env" \
+        "#!@TERMUX__PREFIX@/bin/env bash${NL}echo hello-termux-bin-env" 1 \
+        "" "." \
+        0 "^hello-termux-bin-env$" || return $?
+
+    run_script_exec_test "empty-file" \
+        "" 1 \
+        "" "." \
+        0 "^$" || return $?
+
+    return 0
+
+}
+
+testExec__Interpreter() {
+
+    log 3 "testExec__Interpreter()"
+
+    run_script_exec_test "shebang-with-initial-whitespace" \
+        "# !/bin/sh${NL}echo hello" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "shebang-with-args-with-spaces" \
+        "#!/bin/echo     hello  world   bye${NL}" 1 \
+        "" "." \
+        0 "^hello  world   bye $SCRIPT_TEST_FILE_PATH arg1 arg2$" \
+        "arg1" "arg2" || return $?
+
+
+    run_script_exec_test "shebang-path-missing" \
+        "#!${NL}" 1 \
+        "" "." \
+        0 "^$" || return $?
+
+    run_script_exec_test "shebang-path-whitespace" \
+        "#! ${NL}" 1 \
+        "" "." \
+        0 "^$" || return $?
+
+    run_script_exec_test "shebang-path-rootfs" \
+        "#!/${NL}" 1 \
+        "" "." \
+        126 "^.*: $SCRIPT_TEST_FILE_PATH: /: bad interpreter: Permission denied$" || return $?
+
+    run_script_exec_test "shebang-path-not-found" \
+        "#!/x${NL}" 1 \
+        "" "." \
+        127 "^.*: $SCRIPT_TEST_FILE_PATH: cannot execute: required file not found$" || return $?
+
+    return 0
+
+}
+
+testExec__SingleAndDoubleDotExecutablePaths() {
+
+    log 3 "testExec__SingleAndDoubleDotExecutablePaths()"
+
+    # $TMPDIR
+    #   - termux-exec
+    #     - exec
+    #       - dir1
+    #         - subdir1
+    #       - dir2
+
+    local tests_dir_path="$TERMUX_EXEC_TESTS__EXEC_TMPDIR_PATH"
+    rm -rf "$tests_dir_path" || return $?
+
+    local dir1_name="dir1"
+    local dir1_path="$tests_dir_path/$dir1_name"
+    local subdir1_name="subdir1"
+    local subdir1_path="$dir1_path/$subdir1_name"
+    mkdir -p "$subdir1_path" || return $?
+
+    local dir2_name="dir2"
+    local dir2_path="$tests_dir_path/$dir2_name"
+    mkdir -p "$dir2_path" || return $?
+
+    local original_script_test_file_path="$SCRIPT_TEST_FILE_PATH"
+
+
+
+    # Relative: Executable in current directory
+    SCRIPT_TEST_FILE_PATH="$tests_dir_path/$SCRIPT_TEST_FILE_NAME"
+
+    run_script_exec_test "executable-relative-current-dir-one-single-dot" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "./$SCRIPT_TEST_FILE_NAME" "$tests_dir_path" \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "executable-relative-current-dir-two-single-dot" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "././$SCRIPT_TEST_FILE_NAME" "$tests_dir_path" \
+        0 "^hello$" || return $?
+
+
+    # Relative: Executable in parent directory
+    SCRIPT_TEST_FILE_PATH="$tests_dir_path/$SCRIPT_TEST_FILE_NAME"
+
+    run_script_exec_test "executable-relative-parent-dir-one-double-dot" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "../$SCRIPT_TEST_FILE_NAME" "$dir1_path" \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "executable-relative-parent-dir-two-double-dot" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "../../$SCRIPT_TEST_FILE_NAME" "$subdir1_path" \
+        0 "^hello$" || return $?
+
+
+    # Relative: Executable in sibling directory
+    SCRIPT_TEST_FILE_PATH="$dir2_path/$SCRIPT_TEST_FILE_NAME"
+
+    run_script_exec_test "executable-relative-sibling-dir-one-double-dot" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "../$dir2_name/$SCRIPT_TEST_FILE_NAME" "$dir1_path" \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "executable-relative-sibling-dir-two-double-dot" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "../../$dir2_name/$SCRIPT_TEST_FILE_NAME" "$subdir1_path" \
+        0 "^hello$" || return $?
+
+
+
+    # Absolute: Executable in current directory
+    SCRIPT_TEST_FILE_PATH="$tests_dir_path/$SCRIPT_TEST_FILE_NAME"
+
+    run_script_exec_test "executable-absolute-current-dir-one-single-dot" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "$tests_dir_path/./$SCRIPT_TEST_FILE_NAME" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "executable-absolute-current-dir-two-single-dot" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "$tests_dir_path/././$SCRIPT_TEST_FILE_NAME" "." \
+        0 "^hello$" || return $?
+
+
+    # Absolute: Executable in parent directory
+    SCRIPT_TEST_FILE_PATH="$tests_dir_path/$SCRIPT_TEST_FILE_NAME"
+
+    run_script_exec_test "executable-absolute-parent-dir-one-double-dot" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "$dir1_path/../$SCRIPT_TEST_FILE_NAME" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "executable-absolute-parent-dir-two-double-dot" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "$subdir1_path/../../$SCRIPT_TEST_FILE_NAME" "." \
+        0 "^hello$" || return $?
+
+
+    # Absolute: Executable in sibling directory
+    SCRIPT_TEST_FILE_PATH="$dir2_path/$SCRIPT_TEST_FILE_NAME"
+
+    run_script_exec_test "executable-absolute-sibling-dir-one-double-dot" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "$dir1_path/../$dir2_name/$SCRIPT_TEST_FILE_NAME" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "executable-absolute-sibling-dir-two-double-dot" \
+        "#!/bin/bash${NL}echo hello" 1 \
+        "$subdir1_path/../../$dir2_name/$SCRIPT_TEST_FILE_NAME" "." \
+        0 "^hello$" || return $?
+
+
+
+    SCRIPT_TEST_FILE_PATH="$original_script_test_file_path"
+
+    return 0
+
+}
+
+testExec__SingleAndDoubleDotInterpreterPaths() {
+
+    log 3 "testExec__SingleAndDoubleDotInterpreterPaths()"
+
+    # $TMPDIR
+    #   - termux-exec
+    #     - exec
+    #       - dir1
+    #         - subdir1
+    #       - dir2
+
+    local tests_dir_path="$TERMUX_EXEC_TESTS__EXEC_TMPDIR_PATH"
+    rm -rf "$tests_dir_path" || return $?
+
+    local dir1_name="dir1"
+    local dir1_path="$tests_dir_path/$dir1_name"
+    local subdir1_name="subdir1"
+    local subdir1_path="$dir1_path/$subdir1_name"
+    mkdir -p "$subdir1_path" || return $?
+
+    local dir2_name="dir2"
+    local dir2_path="$tests_dir_path/$dir2_name"
+    mkdir -p "$dir2_path" || return $?
+
+
+    local bash_bin_path="@TERMUX__PREFIX@/bin/bash"
+    local interpreter_file_name="bash"
+    local interpreter_file_path
+
+
+    # Relative: Executable in current directory
+    interpreter_file_path="$tests_dir_path/$interpreter_file_name"
+    ln -s "$bash_bin_path" "$interpreter_file_path" || return $?
+
+    run_script_exec_test "interpreter-relative-current-dir-one-single-dot" \
+        "#!./$interpreter_file_name${NL}echo hello" 1 \
+        "" "$tests_dir_path" \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "interpreter-relative-current-dir-two-single-dot" \
+        "#!././$interpreter_file_name${NL}echo hello" 1 \
+        "" "$tests_dir_path" \
+        0 "^hello$" || return $?
+
+    rm -f "$interpreter_file_path" || return $?
+
+
+    # Relative: Executable in parent directory
+    interpreter_file_path="$tests_dir_path/$interpreter_file_name"
+    ln -s "$bash_bin_path" "$interpreter_file_path" || return $?
+
+    run_script_exec_test "interpreter-relative-parent-dir-one-double-dot" \
+        "#!../$interpreter_file_name${NL}echo hello" 1 \
+        "" "$dir1_path" \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "interpreter-relative-parent-dir-two-double-dot" \
+        "#!../../$interpreter_file_name${NL}echo hello" 1 \
+        "" "$subdir1_path" \
+        0 "^hello$" || return $?
+
+    rm -f "$interpreter_file_path" || return $?
+
+
+    # Relative: Executable in sibling directory
+    interpreter_file_path="$dir2_path/$interpreter_file_name"
+    ln -s "$bash_bin_path" "$interpreter_file_path" || return $?
+
+    run_script_exec_test "interpreter-relative-sibling-dir-one-double-dot" \
+        "#!../$dir2_name/$interpreter_file_name${NL}echo hello" 1 \
+        "" "$dir1_path" \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "interpreter-relative-sibling-dir-two-double-dot" \
+        "#!../../$dir2_name/$interpreter_file_name${NL}echo hello" 1 \
+        "" "$subdir1_path" \
+        0 "^hello$" || return $?
+
+    rm -f "$interpreter_file_path" || return $?
+
+
+
+    # Absolute: Executable in current directory
+    interpreter_file_path="$tests_dir_path/$interpreter_file_name"
+    ln -s "$bash_bin_path" "$interpreter_file_path" || return $?
+
+    run_script_exec_test "interpreter-absolute-current-dir-one-single-dot" \
+        "#!$tests_dir_path/./$interpreter_file_name${NL}echo hello" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "interpreter-absolute-current-dir-two-single-dot" \
+        "#!$tests_dir_path/././$interpreter_file_name${NL}echo hello" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    rm -f "$interpreter_file_path" || return $?
+
+
+    # Absolute: Executable in parent directory
+    interpreter_file_path="$tests_dir_path/$interpreter_file_name"
+    ln -s "$bash_bin_path" "$interpreter_file_path" || return $?
+
+    run_script_exec_test "interpreter-absolute-parent-dir-one-double-dot" \
+        "#!$dir1_path/../$interpreter_file_name${NL}echo hello" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "interpreter-absolute-parent-dir-two-double-dot" \
+        "#!$subdir1_path/../../$interpreter_file_name${NL}echo hello" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    rm -f "$interpreter_file_path" || return $?
+
+
+    # Absolute: Executable in sibling directory
+    interpreter_file_path="$dir2_path/$interpreter_file_name"
+    ln -s "$bash_bin_path" "$interpreter_file_path" || return $?
+
+    run_script_exec_test "interpreter-absolute-sibling-dir-one-double-dot" \
+        "#!$dir1_path/../$dir2_name/$interpreter_file_name${NL}echo hello" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "interpreter-absolute-sibling-dir-two-double-dot" \
+        "#!$subdir1_path/../../$dir2_name/$interpreter_file_name${NL}echo hello" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    rm -f "$interpreter_file_path" || return $?
+
+    return 0
+
+}
+
+testExec__Shell() {
+
+    log 3 "testExec__Shell()"
+
+    # `/dev/stdin` does not exist on Android 7, so use `/proc/self/fd/0`
+
+    run_script_exec_test "bash-heredoc-no-args" \
+        "#!/usr/bin/bash${NL}bash <<'EOF'${NL}echo hello${NL}EOF" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "cat-bash-heredoc-no-args" \
+        "#!/usr/bin/bash${NL}cat <<'EOF' | bash${NL}echo hello${NL}EOF" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+
+    run_script_exec_test "bash-heredoc-with-args" \
+        "#!/usr/bin/bash${NL}bash /proc/self/fd/0 hello<<'EOF'${NL}echo \$1${NL}EOF" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "cat-bash-heredoc-with-args" \
+        "#!/usr/bin/bash${NL}cat <<'EOF' | bash /proc/self/fd/0 hello${NL}echo \$1${NL}EOF" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+
+    run_script_exec_test "bash-herestring-no-args" \
+        "#!/usr/bin/bash${NL}bash <<<'echo hello'" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "cat-bash-herestring-no-args" \
+        "#!/usr/bin/bash${NL}cat <<<'echo hello' | bash" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+
+    run_script_exec_test "bash-herestring-with-args" \
+        "#!/usr/bin/bash${NL}bash  /proc/self/fd/0 hello <<<'echo \$1'" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "cat-bash-herestring-with-args" \
+        "#!/usr/bin/bash${NL}cat <<<'echo \$1' | bash /proc/self/fd/0 hello" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+
+    run_script_exec_test "builtin-echo-cat-pipe" \
+        "#!/usr/bin/bash${NL}echo hello | cat" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "external-echo-cat-pipe" \
+        "#!/usr/bin/bash${NL}@TERMUX__PREFIX@/bin/echo hello | cat" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    run_script_exec_test "external-echo-sed-pipe" \
+        "#!/usr/bin/bash${NL}@TERMUX__PREFIX@/bin/echo '|hello|' | sed -e 's/|//g'" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+
+    run_script_exec_test "fd-read-write" \
+        "#!/usr/bin/bash${NL}exec {fd}< <(echo -n hello)${NL}cat /proc/self/fd/\${fd}${NL}exec {fd}>&-" 1 \
+        "" "." \
+        0 "^hello$" || return $?
+
+    return 0
+
+}
+
+testExec__AndroidTools() {
+
+    log 3 "testExec__AndroidTools()"
+
+    # Remove LD_LIBRARY_PATH from environment to avoid conflicting
+    # with system libraries that system binaries may link against
+    # Some tools require having /system/bin/app_process in the PATH,
+    # at least `am` and `pm` on a Nexus 6p running Android 6.0
+    local android_env="LD_LIBRARY_PATH= LD_PRELOAD= PATH=/system/bin"
+
+    run_script_exec_test "android-getprop-ro-build-version-sdk" \
+        "#!/usr/bin/bash${NL}${android_env} /system/bin/getprop 'ro.build.version.sdk'" 1 \
+        "" "." \
+        0 "^[0-9]+$" || return $?
+
+    run_script_exec_test "android-pm-list-termux-package" \
+        "#!/usr/bin/bash${NL}out=\"\$(${android_env} /system/bin/pm list packages -u --user '@TERMUX_ENV__SE_TERMUX@USER_ID' 2>&1 </dev/null)\"; echo \"\$out\" | grep '@TERMUX_APP__PACKAGE_NAME@'" 1 \
+        "" "." \
+        0 "^.*package:@TERMUX_APP__PACKAGE_NAME@.*$" || return $?
+
+    run_script_exec_test "android-logcat" \
+        "#!/usr/bin/bash${NL}${android_env} /system/bin/logcat -d -t 100" 1 \
+        "" "." \
+        0 "^.*..*$" || return $?
+
+    return 0
+
+}
+
+testExec__TermuxTools() {
+
+    log 3 "testExec__TermuxTools()"
+
+    run_script_exec_test "termux-getprop-ro-build-version-sdk" \
+        "#!/usr/bin/bash${NL}getprop 'ro.build.version.sdk'" 1 \
+        "" "." \
+        0 "^[0-9]+$" || return $?
+
+    run_script_exec_test "termux-pm-list-termux-package" \
+        "#!/usr/bin/bash${NL}out=\"\$(pm list packages -u --user '@TERMUX_ENV__SE_TERMUX@USER_ID' 2>&1 </dev/null)\"; echo \"\$out\" | grep '@TERMUX_APP__PACKAGE_NAME@'" 1 \
+        "" "." \
+        0 "^.*package:@TERMUX_APP__PACKAGE_NAME@.*$" || return $?
+
+    run_script_exec_test "termux-logcat" \
+        "#!/usr/bin/bash${NL}logcat -d -t 100" 1 \
+        "" "." \
+        0 "^.*..*$" || return $?
+
+    run_script_exec_test "termux-info" \
+        "#!/usr/bin/bash${NL}termux-info --no-set-clipboard" 1 \
+        "" "." \
+        0 "^.*@TERMUX_ENV__S_TERMUX@USER_ID=@TERMUX_ENV__SE_TERMUX@USER_ID.*$" || return $?
+
+    # Send empty file/url and just check no error was set while sending intent
+    run_script_exec_test "termux-open" \
+        "#!/usr/bin/bash${NL}termux-open ''" 1 \
+        "" "." \
+        0 "^.*.*$" || return $?
+
+    # Just check no error was set while sending intent
+    # termux-setup-storage, sends the same intent but requires ~/storage
+    # directory to not exist, so do not test that.
+    run_script_exec_test "termux-reload-settings" \
+        "#!/usr/bin/bash${NL}termux-reload-settings" 1 \
+        "" "." \
+        0 "^.*.*$" || return $?
+
+    return 0
+
+}
+
+testExec__TermuxAm() {
+
+    log 3 "testExec__TermuxAm()"
+
+    # The `--user` flag must be passed if running in a secondary user (`> 0`)
+    testExec__TermuxAm__wrapper "-user" " --user '@TERMUX_ENV__SE_TERMUX@USER_ID'" || return $?
+
+    # If `--user` flag is not passed to  `am`, then it should
+    # automatically use current user as default, so test that.
+    testExec__TermuxAm__wrapper "-current-user" "" || return $?
+
+    return 0
+
+}
+
+testExec__TermuxAm__wrapper() {
+
+    local test_name_suffix="$1"
+    local user_id_arg="$2"
+
+    # Set `rw-------` permission to `am.apk` to test if `am` correctly
+    # makes its read only to prevent`SIGABRT` on Android `>= 14`
+    # - https://github.com/termux/TermuxAm/commit/598a9c06c325db6d41cc840dedcb8ba34564c79f
+    local am_apk_path="@TERMUX__PREFIX@/libexec/termux-am/am.apk"
+    chmod 0600 "$am_apk_path" || return $?
+
+
+    if [ "$ANDROID__BUILD_VERSION_SDK" -ge 34 ]; then
+        run_script_exec_test "am-broadcast$test_name_suffix" \
+            "#!/usr/bin/bash${NL}am broadcast$user_id_arg -a '@TERMUX_APP__NAMESPACE@.test' '@TERMUX_APP__PACKAGE_NAME@'" 1 \
+            "" "." \
+            0 "^.*Broadcast sent without waiting for result$" || return $?
+    else
+        run_script_exec_test "am-broadcast$test_name_suffix" \
+            "#!/usr/bin/bash${NL}am broadcast$user_id_arg -a '@TERMUX_APP__NAMESPACE@.test' '@TERMUX_APP__PACKAGE_NAME@'" 1 \
+            "" "." \
+            0 "^.*Broadcast completed: result=0$" || return $?
+    fi
+
+    run_script_exec_test "am-start-activity$test_name_suffix" \
+        "#!/usr/bin/bash${NL}am start-activity$user_id_arg '@TERMUX_APP__SHELL_ACTIVITY__COMPONENT_NAME@'" 1 \
+        "" "." \
+        0 "^.*Starting: Intent \{.*\}.*$" || return $?
+
+    run_script_exec_test "am-start-service$test_name_suffix" \
+        "#!/usr/bin/bash${NL}am start-service$user_id_arg '@TERMUX_APP__SHELL_SERVICE__COMPONENT_NAME@'" 1 \
+        "" "." \
+        0 "^.*Starting service: Intent \{.*\}.*$" || return $?
+
+    return 0
+
+}
+
+testExec__TermuxAmSocket() {
+
+    log 3 "testExec__TermuxAmSocket()"
+
+    # If cannot connect to TermuxAmSocketServer in termux-app to get am help
+    if [[ "$(termux-am --am-help 2>/dev/null)" != *"usage: am "* ]]; then
+        log 3 "Skipping termux-am-socket tests since failed to connect to server"
+        return 0
+    fi
+
+    # The `--user` flag must be passed if running in a secondary user (`> 0`)
+    testExec__TermuxAmSocket__wrapper "-user" " --user '@TERMUX_ENV__SE_TERMUX@USER_ID'" || return $?
+
+    # If `--user` flag is not passed to  `termux-am`, then it should
+    # automatically use current user as default, so test that.
+    if [[ "@TERMUX_ENV__SE_TERMUX@USER_ID" == "0" ]]; then
+        testExec__TermuxAmSocket__wrapper "-current-user" "" || return $?
+    fi
+
+    return 0
+
+}
+
+testExec__TermuxAmSocket__wrapper() {
+
+    local test_name_suffix="$1"
+    local user_id_arg="$2"
+
+    run_script_exec_test "termux-am-broadcast$test_name_suffix" \
+        "#!/usr/bin/bash${NL}termux-am broadcast$user_id_arg -a '@TERMUX_APP__NAMESPACE@.test' '@TERMUX_APP__PACKAGE_NAME@'" 1 \
+        "" "." \
+        0 "^.*Broadcast completed: result=.*$" || return $? # resultCode seems to be -1
+
+    run_script_exec_test "termux-am-start-activity$test_name_suffix" \
+        "#!/usr/bin/bash${NL}termux-am start$user_id_arg '@TERMUX_APP__SHELL_ACTIVITY__COMPONENT_NAME@'" 1 \
+        "" "." \
+        0 "^.*Starting: Intent \{.*\}.*$" || return $?
+
+    run_script_exec_test "termux-am-start-service$test_name_suffix" \
+        "#!/usr/bin/bash${NL}termux-am startservice$user_id_arg '@TERMUX_APP__SHELL_SERVICE__COMPONENT_NAME@'" 1 \
+        "" "." \
+        0 "^.*Starting service: Intent \{.*\}.*$" || return $?
+
+    return 0
+
+}
+
+testExec__TermuxApi() {
+
+    log 3 "testExec__TermuxApi()"
+
+    # If running as root
+    if [[ "$TERMUX_EXEC_TESTS__UID" == "0" ]]; then
+        log 3 "Skipping termux-api tests since running as root"
+        return 0
+    fi
+
+    # If termux-app did not export the version variable for termux-api app
+    if [[ ! "@TERMUX_ENV__SE_TERMUX_API_APP@VERSION_NAME" =~ ^[0-9]\.[0-9].*$ ]]; then
+        log 3 "Skipping termux-api tests since app not installed"
+        return 0
+    fi
+
+    # If termux-api-package is not installed
+    if [[ ! -f "@TERMUX__PREFIX@/libexec/termux-api" ]]; then
+        log 3 "Skipping termux-api tests since package not installed"
+        return 0
+    fi
+
+    run_script_exec_test "termux-battery-status" \
+        "#!/usr/bin/bash${NL}termux-battery-status" 1 \
+        "" "." \
+        0 "^.*\"percentage\": [0-9]+.*$" || return $?
+
+    run_script_exec_test "termux-usb" \
+        "#!/usr/bin/bash${NL}termux-usb -l" 1 \
+        "" "." \
+        0 "^\[.*\]$" || return $?
+
+    run_script_exec_test "termux-clipboard-set" \
+        "#!/usr/bin/bash${NL}termux-clipboard-set termux-api-test" 1 \
+        "" "." \
+        0 "^$" || return $?
+
+    # Wait for clipboard to be set
+    sleep 3
+
+    run_script_exec_test "termux-clipboard-get" \
+        "#!/usr/bin/bash${NL}termux-clipboard-get" 1 \
+        "" "." \
+        0 "^termux-api-test$" || return $?
+
+    return 0
+
+}
+
+
+
+##
+# run_script_exec_test `test_name` `test_file_content` `test_file_make_executable` \
+#   `execution_path` `working_directory` \
+#   `expected_exit_code` `expected_output_regex` `[script_args]`
+##
+run_script_exec_test() {
+
+    local return_value
+
+    if [[ $# -lt 7 ]]; then
+        log_errors "Invalid argument count. The \"run_script_exec_test\" command expects at least 7 arguments: \
+ test_name test_file_content test_file_make_executable execution_path working_directory expected_exit_code expected_output_regex [script_args]"
+        return 1
+    fi
+
+    local test_name="$1"
+    local test_file_content="$2"
+    local test_file_make_executable="$3"
+    local execution_path="$4"
+    local working_directory="$5"
+    local expected_exit_code="$6"
+    local expected_output_regex="$7"
+    shift 7 # Remove args before script_args
+
+    local output
+    local actual_output
+    local test_failed
+
+    log 4 "Running \"$test_name\" test"
+    log 5 "SCRIPT_TEST_FILE_PATH=\"$SCRIPT_TEST_FILE_PATH\""
+    if [[ "$test_file_content" == *"${NL}"* ]]; then
+        log 5 "test_file_content=${NL}"'```'"${NL}$test_file_content${NL}"'```'
+    else
+        log 5 "test_file_content=\"$test_file_content\""
+    fi
+    log 5 "test_file_make_executable=\"$test_file_make_executable\""
+    log 5 "execution_path=\"$execution_path\""
+    log 5 "working_directory=\"$working_directory\""
+    log 5 "expected_exit_code=\"$expected_exit_code\""
+    log 5 "expected_output_regex=\"$expected_output_regex\""
+
+    # If SCRIPT_TEST_FILE_PATH is not a valid absolute path
+    if [[ ! "$SCRIPT_TEST_FILE_PATH" =~ $VALID_ABSOLUTE_PATH_REGEX ]]; then
+        log_errors "The SCRIPT_TEST_FILE_PATH \"$SCRIPT_TEST_FILE_PATH\" is not a valid absolute path"
+        return 1
+    fi
+
+    rm -f "$SCRIPT_TEST_FILE_PATH" || return $?
+
+    output="$(printf "%s" "$test_file_content" > "$SCRIPT_TEST_FILE_PATH" 2>&1)"
+    return_value=$?
+    if [ $return_value -ne 0 ]; then
+        log_errors "$output"
+        log_errors "Failed to create the \"$SCRIPT_TEST_FILE_PATH\" file for the \"$test_name\" test"
+        return $return_value
+    fi
+
+    if [[ "$test_file_make_executable" == "1" ]]; then
+        output="$(chmod +x "$SCRIPT_TEST_FILE_PATH" 2>&1)"
+        return_value=$?
+        if [ $return_value -ne 0 ]; then
+            log_errors "$output"
+            log_errors "Failed to set the executable bit for the \"$SCRIPT_TEST_FILE_PATH\" file for the \"$test_name\" test"
+            return $return_value
+        fi
+    fi
+
+    actual_output="$(cd "$working_directory" && "${execution_path:-$SCRIPT_TEST_FILE_PATH}" "$@" 2>&1)"
+    actual_exit_code=$?
+    if [[ -n "$expected_output_regex" ]] && [[ ! "$actual_output" =~ $expected_output_regex ]]; then
+        log_errors "FAILED: \"$test_name\" test"
+        log_errors "Expected output_regex does not equal match actual output"
+        test_failed=1
+    elif [ $actual_exit_code != "$expected_exit_code" ]; then
+        log_errors "$actual_output"
+        log_errors "FAILED: \"$test_name\" test"
+        log_errors "Expected result_code does not equal actual result_code"
+        test_failed=1
+    fi
+
+    if [[ "$test_failed" == "1" ]]; then
+        if [[ "$test_file_content" == *"${NL}"* ]]; then
+            log_errors "test_file_content=${NL}"'```'"${NL}$test_file_content${NL}"'```'
+        else
+            log_errors "test_file_content=\"$test_file_content\""
+        fi
+        log_errors "actual_exit_code: \"$actual_exit_code\""
+        log_errors "expected_exit_code: \"$expected_exit_code\""
+        log_errors "actual_output: \"$actual_output\""
+        log_errors "expected_output_regex: \"$expected_output_regex\""
+        return 100
+    else
+        #log 2 "PASSED"
+
+        # Remove test file so that later tests in like `testExec__SingleAndDoubleDotExecutablePaths()` do not accidentally use it
+        rm -f "$SCRIPT_TEST_FILE_PATH" || return $?
+
+        return 0
+    fi
+
+}
+
+
+
+##
+# runtime_script_tests_main
+##
+runtime_script_tests_main() {
+
+    log 1 "Start \"runtime_script\" tests"
+
+    runExecTests || return $?
+
+    log 1 "End \"runtime_script\" tests"
+
+    return 0
+}

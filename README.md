@@ -1,24 +1,36 @@
 # termux-exec
-A `execve()` wrapper to fix problem with shebangs when running in Termux.
 
-# Problem
-A lot of Linux software is written with the assumption that `/bin/sh`, `/usr/bin/env`
-and similar file exists. This is not the case on Android where neither `/bin/` nor `/usr/`
-exists.
+The `termux-exec` is a shared library that is meant to be preloaded with [`LD_PRELOAD`](https://man7.org/linux/man-pages/man8/ld.so.8.html) for proper functioning of the Termux execution environment.
 
-When building packages for Termux those hard-coded assumptions are patched away - but this
-does not help with installing scripts and programs from other sources than Termux packages.
+### Contents
 
-# Solution
-Create an `execve()` wrapper that rewrites calls to execute files under `/bin/` and `/usr/bin`
-into the matching Termux executables under `$PREFIX/bin/` and inject that into processes
-using `LD_PRELOAD`.
+- [Project](#project)
+- [License](#license)
 
-# How to install
-1. Install with `pkg install termux-exec`.
-2. Exit your current session and start a new one.
-3. From now on shebangs such as `/bin/sh` and `/usr/bin/env python` should work.
+---
 
-# Where is LD_PRELOAD set?
-The `$PREFIX/bin/login` program which is used to create new Termux sessions checks for
-`$PREFIX/lib/libtermux-exec.so` and if so sets up `LD_PRELOAD` before launching the login shell.
+&nbsp;
+
+
+
+
+
+## Project
+
+**Check the `termux-exec` project info [here](site/pages/en/projects/index.md), including `docs` and `releases` info.**
+
+---
+
+&nbsp;
+
+
+
+
+
+## License
+
+Check `license` info [here](LICENSE.md).
+
+---
+
+&nbsp;

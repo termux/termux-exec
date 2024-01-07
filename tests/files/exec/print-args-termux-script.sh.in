@@ -1,0 +1,3 @@
+#!@TERMUX__PREFIX@/bin/sh
+
+echo "$@"
