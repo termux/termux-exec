@@ -35,8 +35,8 @@
 static const char* termux_rewrite_executable(const char* filename, char* buffer, int buffer_len)
 {
 	if (starts_with(filename, TERMUX_BASE_DIR) ||
-			starts_with(filename, "/system/"))
-		return filename;
+				starts_with(filename, "/system/"))
+			return filename;
 
 	strcpy(buffer, TERMUX_PREFIX "/bin/");
 	char* bin_match = strstr(filename, "/bin/");
@@ -72,8 +72,12 @@ static char*const * remove_ld_preload(char*const * envp)
 	return envp;
 }
 
-int execve(const char* filename, char* const* argv, char* const* envp)
+
+static void update_filename_argv_envp(const char **filename_ptr, char* const **argv_ptr, char*const **envp_ptr)
 {
+	const char *filename = *filename_ptr;
+	char* const* argv = *argv_ptr;
+	char* const* envp = *envp_ptr;
 	bool android_10_debug = getenv("TERMUX_ANDROID10_DEBUG") != NULL;
 	if (android_10_debug) {
 		printf("execve(%s):\n", filename);
@@ -90,7 +94,6 @@ int execve(const char* filename, char* const* argv, char* const* envp)
 
 	char filename_buffer[512];
 	filename = termux_rewrite_executable(filename, filename_buffer, sizeof(filename_buffer));
-
 	// Error out if the file is not executable:
 	if (access(filename, X_OK) != 0) goto final;
 
@@ -117,7 +120,7 @@ int execve(const char* filename, char* const* argv, char* const* envp)
 		}
 		new_envp[pos] = NULL;
 
-		envp = (char**)new_envp;
+		*envp_ptr = (char**)new_envp;
 		// Not.sure if needed.
 		environ = (char**)new_envp;
 	}
@@ -127,22 +130,29 @@ int execve(const char* filename, char* const* argv, char* const* envp)
 	char header[128];
 	ssize_t read_bytes = read(fd, header, sizeof(header) - 1);
 
+
 	// If we are executing a non-native ELF file, unset LD_PRELOAD.
 	// This avoids CANNOT LINK EXECUTABLE errors when running 32-bit code
 	// on 64-bit.
 	if (read_bytes >= 20 && !memcmp(header, ELFMAG, SELFMAG)) {
 		Elf32_Ehdr* ehdr = (Elf32_Ehdr*)header;
 		if (ehdr->e_machine != EM_NATIVE) {
-			envp = remove_ld_preload(envp);
+			*envp_ptr = remove_ld_preload(envp);
 		}
 		goto final;
 	}
-	if (read_bytes < 5 || !(header[0] == '#' && header[1] == '!')) goto final;
+
+	if (read_bytes < 5 || !(header[0] == '#' && header[1] == '!')) {
+	        fprintf(stderr, "Not shebang!\n");
+       		goto final;
+    	}		
 
 	header[read_bytes] = 0;
 	char* newline_location = strchr(header, '\n');
-	if (newline_location == NULL) goto final;
-
+	if (newline_location == NULL) {
+		fprintf(stderr, "quitting\n");
+		goto final;
+	}
 	// Strip whitespace at end of shebang:
 	while (*(newline_location - 1) == ' ') newline_location--;
 
@@ -152,8 +162,10 @@ int execve(const char* filename, char* const* argv, char* const* envp)
 	// Skip whitespace to find interpreter start:
 	char* interpreter = header + 2;
 	while (*interpreter == ' ') interpreter++;
-	if (interpreter == newline_location) goto final;
-
+	if (interpreter == newline_location) {
+		fprintf(stderr, "found same thing: %s\n", interpreter);
+		goto final;
+	}
 	char* arg = NULL;
 	char* whitespace_pos = strchr(interpreter, ' ');
 	if (whitespace_pos != NULL) {
@@ -171,8 +183,11 @@ int execve(const char* filename, char* const* argv, char* const* envp)
 
 	char interp_buf[512];
 	const char* new_interpreter = termux_rewrite_executable(interpreter, interp_buf, sizeof(interp_buf));
-	if (new_interpreter == interpreter) goto final;
-
+	if (new_interpreter == interpreter) {
+		fprintf(stderr, "%d: found the same interpreter: %s\n", __LINE__, new_interpreter);
+		goto final;
+	}
+ 
 	int orig_argv_count = 0;
 	while (argv[orig_argv_count] != NULL) orig_argv_count++;
 
@@ -187,11 +202,10 @@ int execve(const char* filename, char* const* argv, char* const* envp)
 	new_argv[current_argc] = NULL;
 
 	filename = new_interpreter;
-	argv = (char**) new_argv;
+	*argv_ptr = (char**) new_argv;
 
 final:
 	if (fd != -1) close(fd);
-	int (*real_execve)(const char*, char* const[], char* const[]) = dlsym(RTLD_NEXT, "execve");
 
 	bool android_10_wrapping = getenv("TERMUX_ANDROID10") != NULL;
 	if (android_10_wrapping) {
@@ -215,7 +229,7 @@ final:
 				new_argv[orig_argv_count + 1] = NULL;
 				argv = (char**) new_argv;
 				// Remove LD_PRELOAD environment variable when wrapping in proot
-				envp = remove_ld_preload(envp);
+				*envp_ptr = remove_ld_preload(envp);
 			}
 		} else {
 			errno = 0;
@@ -230,9 +244,29 @@ final:
 			}
 		}
 	}
+	
+	*filename_ptr = (char*)filename;
 
-	int ret = real_execve(filename, argv, envp);
 	free(new_argv);
 	free(new_envp);
+}
+
+
+int execve(const char* filename, char* const* argv, char* const* envp)
+{
+	int (*real_execve)(const char*, char* const[], char* const[]) = dlsym(RTLD_NEXT, "execve");
+	update_filename_argv_envp(&filename, &argv, &envp);
+	int ret = real_execve(filename, argv, envp);
 	return ret;
 }
+
+
+int execvp(const char* filename, char* const argv[])
+{
+	char* const* envp = NULL;
+	int (*real_execvp) (const char*, char* const[]) = dlsym(RTLD_NEXT, "execvp");
+	update_filename_argv_envp(&filename, &argv, &envp);
+	int ret = real_execvp(filename, argv);
+	return ret;
+}
+
