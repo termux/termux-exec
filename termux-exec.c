@@ -35,8 +35,8 @@
 static const char* termux_rewrite_executable(const char* filename, char* buffer, int buffer_len)
 {
 	if (starts_with(filename, TERMUX_BASE_DIR) ||
-				starts_with(filename, "/system/"))
-			return filename;
+			starts_with(filename, "/system/"))
+		return filename;
 
 	strcpy(buffer, TERMUX_PREFIX "/bin/");
 	char* bin_match = strstr(filename, "/bin/");
