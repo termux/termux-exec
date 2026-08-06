@@ -10,15 +10,13 @@ log_error() { echo "termux-exec.postinst:" "$@" 1>&2; }
 ##
 main() {
 
-    log "Start"
-
     # Run after the package is installed: `postinst configure <old-version>`
     # - https://manpages.debian.org/testing/dpkg-dev/deb-postinst.5.en.html#postinst
     if [ "$1" = "configure" ]; then
+        log "Start"
         set_primary_termux_ld_preload_library || return $?
+        log "End"
     fi
-
-    log "End"
 
 }
 

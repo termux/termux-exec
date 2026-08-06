@@ -10,12 +10,26 @@ case "${TERMUX_EXEC__SYSTEM_LINKER_EXEC__LOG_LEVEL:-}" in
     0|1|2) :;; *) TERMUX_EXEC__SYSTEM_LINKER_EXEC__LOG_LEVEL=1;; # Default: `1` (OFF=0, NORMAL=1, DEBUG=2)
 esac
 
+TERMUX__PREFIX___N="@TERMUX_ENV__S_TERMUX@PREFIX"
+termux_exec__system_linker_exec__copy_variable TERMUX__PREFIX "$TERMUX__PREFIX___N" || return $?
+case "${TERMUX__PREFIX:-}" in
+    /*[!/]) :;; *) TERMUX__PREFIX="@TERMUX__PREFIX@";;
+esac
+
+TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE___N="@TERMUX_ENV__S_TERMUX_EXEC@SYSTEM_LINKER_EXEC__MODE"
+termux_exec__system_linker_exec__copy_variable TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE "$TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE___N" || return $?
+
 }
 
 
 
-termux_exec__system_linker_exec__log() { local log_level="${1}"; shift; if [ "$TERMUX_EXEC__SYSTEM_LINKER_EXEC__LOG_LEVEL" -ge "$log_level" ]; then echo "@TERMUX__LNAME@-exec:" "$@"; fi }
+# Note that commands output result to stdout and so must not log any
+# non-command-output to stdout and only to stderr.
+# Use `termux_exec__system_linker_exec__log_error_for_level` for logs
+# instead of `termux_exec__system_linker_exec__log` unless intended.
+#termux_exec__system_linker_exec__log() { local log_level="${1}"; shift; if [ "$TERMUX_EXEC__SYSTEM_LINKER_EXEC__LOG_LEVEL" -ge "$log_level" ]; then echo "@TERMUX__LNAME@-exec.system_linker_exec:" "$@"; fi }
 termux_exec__system_linker_exec__log_error() { echo "@TERMUX__LNAME@-exec:" "$@" 1>&2; }
+termux_exec__system_linker_exec__log_error_for_level() { local log_level="${1}"; shift; if [ "$TERMUX_EXEC__SYSTEM_LINKER_EXEC__LOG_LEVEL" -ge "$log_level" ]; then echo "@TERMUX__LNAME@-exec.system_linker_exec:" "$@" 1>&2; fi }
 
 
 
@@ -39,7 +53,7 @@ termux_exec__system_linker_exec__main() {
     local command_type="${1:-}"
     [ $# -gt 0 ] && shift 1
 
-    if [ "$command_type" = "is-enabled" ]; then
+    if [ "$command_type" = "is-enabled" ] || [ "$command_type" = "should-enable" ]; then
         if [ "${1:-}" = "-q" ] || [ "${1:-}" = "--quiet" ]; then
             TERMUX_EXEC__SYSTEM_LINKER_EXEC__LOG_LEVEL=0
             shift 1
@@ -57,7 +71,9 @@ termux_exec__system_linker_exec__main() {
 
     # TODO: Add `should-enable-for-file` command.
     if [ "$command_type" = "is-enabled" ]; then
-        termux_exec__system_linker_exec__enabled__run_command output || return $?
+        termux_exec__system_linker_exec__is_enabled__run_command output || return $?
+    elif [ "$command_type" = "should-enable" ]; then
+        termux_exec__system_linker_exec__should_enable__run_command output || return $?
     fi
 
     if [ -n "$output" ]; then
@@ -71,17 +87,16 @@ termux_exec__system_linker_exec__main() {
 
 
 ##
-# **IMPORTANT** The logic must be kept consistent with the
-# `isSystemLinkerExecEnabled()` function in `TermuxExecLDPreload.c`.
-#
-#
-# `termux_exec__system_linker_exec__enabled__run_command` `<output_variable_name>`
+# `termux_exec__system_linker_exec__is_enabled__run_command` `<output_variable_name>`
 ##
-termux_exec__system_linker_exec__enabled__run_command() {
+termux_exec__system_linker_exec__is_enabled__run_command() {
+
+    local return_value
 
     local output_variable_name="${1:-}"
 
     termux_exec__system_linker_exec__set_variable "$output_variable_name" "" || return $?
+
 
     local android_build_version_sdk="${ANDROID__BUILD_VERSION_SDK:-}"
     case "$android_build_version_sdk" in
@@ -95,69 +110,192 @@ termux_exec__system_linker_exec__enabled__run_command() {
             esac
             ;;
     esac
-    termux_exec__system_linker_exec__log 2 "android_build_version_sdk: '$android_build_version_sdk'"
+    termux_exec__system_linker_exec__log_error_for_level 2 "android_build_version_sdk: '$android_build_version_sdk'"
+
+
+    local __system_linker_exec_is_enabled="false"
+
+    # If running on Android `>= 10`.
+    # Android 5/6 would also require `LD_LIBRARY_PATH` to be set when
+    # executing a Termux binary, so this check would skip that.
+    # Note the `/system/bin/stat` command is not available on
+    # Android `5`, and only on Android `>= 6`, not that we execute it.
+    if [ "$android_build_version_sdk" -ge 29 ]; then
+        # We execute `$TERMUX__PREFIX/bin/stat` instead of `stat`
+        # so that execution explicitly happens for a file under Termux
+        # app data directory file (`app_data_file` context),
+        # and system linker execution is enabled by
+        # `shouldEnableSystemLinkerExecForFile()` function in `TermuxExecLDPreload.c`,
+        # since if only `stat` is executed, and `$PATH` is set to
+        # `/system/bin`, then `/system/bin/stat` would get executed
+        # instead, for which system linker exec will not be enabled and
+        # will result in a false negative.
+        # We pass `/proc/self/exe` instead of `/proc/$$/exe` so that `stat`
+        # reads its own exe path instead of that of current shell, which
+        # may not have linker as its exe, like exe would be set to
+        # `/system/bin/sh` if running inside a `/system/bin/sh` shell.
+        # We do not execute `readlink`/`realpath` as that may be
+        # patched by `libtermux-exec-ld-preload.so` to
+        # replace the `/proc/self/exe` path with value exported in
+        # `TERMUX_EXEC__PROC_SELF_EXE`.
+        local stat_output
+        stat_output="$("$TERMUX__PREFIX/bin/stat" -c "%N" /proc/self/exe)"
+        return_value=$?
+        if [ $return_value -ne 0 ]; then
+            termux_exec__system_linker_exec__log_error "Failed to get symlink path for '/proc/self/exe' with stat"
+            return $return_value
+        fi
+        termux_exec__system_linker_exec__log_error_for_level 2 "stat_output: \`$stat_output\`"
+
+        # `stat` will output in the format: `'<orig_path>' -> '<symlink_path>'`
+        local stat_prefix="'/proc/self/exe' -> "
+        case "$stat_output" in
+            "$stat_prefix"*)
+                stat_output="${stat_output#"$stat_prefix"}" # Remove prefix.
+                case "$stat_output" in
+                    "'/apex/com.android.runtime/bin/linker64'"|"'/system/bin/linker64'"|"'/apex/com.android.runtime/bin/linker'"|"'/system/bin/linker'")
+                        __system_linker_exec_is_enabled="true"
+                        ;;
+                esac
+                ;;
+        esac
+    fi
+   
+    termux_exec__system_linker_exec__log_error_for_level 2 "system_linker_exec_is_enabled: '$__system_linker_exec_is_enabled'"
+
+    termux_exec__system_linker_exec__set_variable "$output_variable_name" "$__system_linker_exec_is_enabled"
+
+}
+
+
+
+##
+# **IMPORTANT** The logic must be kept consistent with the
+# `shouldEnableSystemLinkerExec()` function in `TermuxExecLDPreload.c`.
+#
+#
+# `termux_exec__system_linker_exec__should_enable__run_command` `<output_variable_name>`
+##
+termux_exec__system_linker_exec__should_enable__run_command() {
+
+    local return_value
+
+    local output_variable_name="${1:-}"
+
+    termux_exec__system_linker_exec__set_variable "$output_variable_name" "" || return $?
+
+
+    local android_build_version_sdk="${ANDROID__BUILD_VERSION_SDK:-}"
+    case "$android_build_version_sdk" in
+        ''|*[!0-9]*)
+            android_build_version_sdk="$(getprop "ro.build.version.sdk")" || true
+            case "$android_build_version_sdk" in
+                ''|*[!0-9]*)
+                    termux_exec__system_linker_exec__log_error "Failed to get android_build_version_sdk value from 'getprop': '$android_build_version_sdk'"
+                    return 1
+                    ;;
+            esac
+            ;;
+    esac
+    termux_exec__system_linker_exec__log_error_for_level 2 "android_build_version_sdk: '$android_build_version_sdk'"
 
 
     local system_linker_exec_mode="${TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE:-}"
     case "${system_linker_exec_mode:-}" in
-        disable|enable|force) :;;
+        disable|enable|force|force_all) :;;
         *) system_linker_exec_mode="enable";;
     esac
-    termux_exec__system_linker_exec__log 2 "system_linker_exec_mode: '$system_linker_exec_mode'"
+    termux_exec__system_linker_exec__log_error_for_level 2 "system_linker_exec_mode: '$system_linker_exec_mode'"
 
 
-    local __system_linker_exec_enabled="false"
+    local __system_linker_exec_should_enable="false"
     if [ "$system_linker_exec_mode" = "disable" ]; then
-        __system_linker_exec_enabled="false"
+        __system_linker_exec_should_enable="false"
 
-    elif [ "$system_linker_exec_mode" = "force" ]; then
+    elif [ "$system_linker_exec_mode" = "force" ] || [ "$system_linker_exec_mode" = "force_all" ]; then
         local system_linker_exec_available="false"
         # If running on Android `>= 10`.
         if [ "$android_build_version_sdk" -ge 29 ]; then
             system_linker_exec_available="true"
         fi
-        termux_exec__system_linker_exec__log 2 "system_linker_exec_available: '$system_linker_exec_available'"
+        termux_exec__system_linker_exec__log_error_for_level 2 "system_linker_exec_available: '$system_linker_exec_available'"
 
         if [ "$system_linker_exec_available" = "true" ]; then
-            __system_linker_exec_enabled="true"
+            if [ "$system_linker_exec_mode" = "force" ]; then
+                local uid
+                uid="$(id -u)"
+                return_value=$?
+                if [ $return_value -ne 0 ]; then
+                    termux_exec__system_linker_exec__log_error "Failed to get uid"
+                    return $return_value
+                fi
+
+                if [ "$uid" = "0" ] || [ "$uid" = "2000" ]; then
+                    termux_exec__system_linker_exec__log_error_for_level 2 "uid_to_exempt: '$uid'"
+                else
+                    __system_linker_exec_should_enable="true"
+                fi
+            elif [ "$system_linker_exec_mode" = "force_all" ]; then
+                __system_linker_exec_should_enable="true"
+            fi
         fi
 
     else
         # If running on Android `>= 10`.
         if [ "$android_build_version_sdk" -ge 29 ]; then
             local app_data_file_exec_exempted="false"
-            # If '/proc/self/attr/current' is not readable,
-            # then SeLinux may not be supported on the device.
-            # Reading the file with `cat` may fail with `Illegal argument`
-            # error on such devices, even though `test -f` and `test -r`
-            # commands for the `access()` call succeed.
-            # `cat: /proc/self/attr/current: Illegal argument`
-            # - https://github.com/termux/termux-exec-package/issues/30
-            local se_process_context
-            se_process_context="$(cat "/proc/self/attr/current")" || true
-            if [ -z "$se_process_context" ]; then
-                termux_exec__system_linker_exec__log_error "Failed to read se_process_context value from '/proc/self/attr/current': '$se_process_context'"
-                termux_exec__system_linker_exec__log 2 "se_process_context_available: 'false'"
-                app_data_file_exec_exempted="true"
-            else
-                termux_exec__system_linker_exec__log 2 "se_process_context_from_file: '$se_process_context'"
-                case "$se_process_context" in
-                    "u:r:untrusted_app_25:"*|"u:r:untrusted_app_27:"*)
-                        app_data_file_exec_exempted="true"
-                        ;;
-                esac
+
+            local uid
+            uid="$(id -u)"
+            return_value=$?
+            if [ $return_value -ne 0 ]; then
+                termux_exec__system_linker_exec__log_error "Failed to get uid"
+                return $return_value
             fi
 
-            termux_exec__system_linker_exec__log 2 "app_data_file_exec_exempted: '$app_data_file_exec_exempted'"
+            # If root or shell user.
+            if [ "$uid" = "0" ] || [ "$uid" = "2000" ]; then
+                termux_exec__system_linker_exec__log_error_for_level 2 "uid_to_exempt: '$uid'"
+                app_data_file_exec_exempted="true"
+            else
+                # If '/proc/self/attr/current' is not readable,
+                # then SeLinux may not be supported on the device.
+                # Reading the file with `cat` may fail with `Illegal argument`
+                # error on such devices, even though `test -f` and `test -r`
+                # commands for the `access()` call succeed.
+                # `cat: /proc/self/attr/current: Illegal argument`
+                # - https://github.com/termux/termux-exec-package/issues/30
+                local se_process_context
+                if [ "$TERMUX_EXEC__SYSTEM_LINKER_EXEC__LOG_LEVEL" -ge 2 ]; then
+                    se_process_context="$(cat "/proc/self/attr/current")" || true
+                else
+                    se_process_context="$(cat "/proc/self/attr/current" 2>/dev/null)" || true
+                fi
+                if [ -z "$se_process_context" ]; then
+                    termux_exec__system_linker_exec__log_error "Failed to read se_process_context value from '/proc/self/attr/current': '$se_process_context'"
+                    termux_exec__system_linker_exec__log_error_for_level 2 "se_process_context_available: 'false'"
+                    app_data_file_exec_exempted="true"
+                else
+                    termux_exec__system_linker_exec__log_error_for_level 2 "se_process_context_from_file: '$se_process_context'"
+                    case "$se_process_context" in
+                        "u:r:untrusted_app_25:"*|"u:r:untrusted_app_27:"*|"u:r:runas_app:"*|"u:r:su:s0"|"u:r:ksu:s0"|"u:r:magisk:s0"|"u:r:shell:s0")
+                            app_data_file_exec_exempted="true"
+                            ;;
+                    esac
+                fi
+            fi
+
+            termux_exec__system_linker_exec__log_error_for_level 2 "app_data_file_exec_exempted: '$app_data_file_exec_exempted'"
 
             if [ "$app_data_file_exec_exempted" = "false" ]; then
-                __system_linker_exec_enabled="true"
+                __system_linker_exec_should_enable="true"
             fi
         fi
     fi
-    termux_exec__system_linker_exec__log 2 "system_linker_exec_enabled: '$__system_linker_exec_enabled'"
 
-    termux_exec__system_linker_exec__set_variable "$output_variable_name" "$__system_linker_exec_enabled"
+    termux_exec__system_linker_exec__log_error_for_level 2 "system_linker_exec_should_enable: '$__system_linker_exec_should_enable'"
+
+    termux_exec__system_linker_exec__set_variable "$output_variable_name" "$__system_linker_exec_should_enable"
 
 }
 
@@ -237,8 +375,16 @@ Usage:
     termux-exec-system-linker-exec [command_options] <command>
 
 Available commands:
-    is-enabled                Get whether 'system_linker_exec'
-                              is enabled in Termux.
+    is-enabled                Get whether 'system_linker_exec' is
+                              currently enabled in Termux based on
+                              current process environment if a
+                              Termux app data file were to be
+                              executed.
+    should-enable             Get whether 'system_linker_exec' should
+                              be enabled in Termux based on current
+                              process environment regardless of if a
+                              Termux app data file were to be
+                              executed.
 
 Available command_options:
     [ -h | --help ]           Display this help screen.
@@ -246,6 +392,11 @@ Available command_options:
     [ -q | --quiet ]          Set log level to 'OFF'.
     [ -v ]
                               Set log level to 'DEBUG'.
+
+termux-exec-system-linker-exec will print 'true' to stdout if an
+enabled system linker exec state is to be returned, otherwise 'false'.
+The result code will be '0' for both cases, and non-zero if an error
+occurred while finding the state.
 HELP_EOF
 
 }

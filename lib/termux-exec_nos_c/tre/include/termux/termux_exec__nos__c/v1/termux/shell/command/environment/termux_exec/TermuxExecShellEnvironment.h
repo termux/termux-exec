@@ -76,7 +76,10 @@ static const int ENV_DEF_VAL__TERMUX_EXEC__EXECVE_CALL__INTERCEPT = 1;
  * Values:
  * - `disable` (0) - The `system_linker_exec` will be disabled.
  * - `enable` (1) - The `system_linker_exec` will be enabled but only if required.
- * - `force` (2) - The `system_linker_exec` will be force enabled even if not required.
+ * - `force` (2) - The `system_linker_exec` will be force enabled even if not required
+ *   and effective user id does not equal root (`0`) and shell (`2000`).
+ * - `force_all` (3) - The `system_linker_exec` will be force enabled even if not required,
+ *   regardless of effective user id.
  */
 #define ENV__TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE TERMUX_ENV__S_TERMUX_EXEC__SYSTEM_LINKER_EXEC "MODE"
 static const int ENV_DEF_VAL__TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE = 1;
@@ -164,11 +167,11 @@ int termuxExec_execveCall_intercept_get();
 
 /**
  * Returns the `termux-exec` config for `system_linker_exec` based on
- * the `ENV__TERMUX_EXEC__SYSTEM_LINKER_EXEC` env variable.
+ * the `ENV__TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE` env variable.
  *
- * @return Return `0` if `ENV__TERMUX_EXEC__SYSTEM_LINKER_EXEC` is set
- * to `disable`, `1` if set to `enable`, `2` if set to `force`,
- * otherwise defaults to `1` (`enable`).
+ * @return Return `0` if `ENV__TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE`
+ * is set to `disable`, `1` if set to `enable`, `2` if set to `force`,
+ * `3` if set to `force_all`, otherwise defaults to `1` (`enable`).
  */
 int termuxExec_systemLinkerExec_mode_get();
 

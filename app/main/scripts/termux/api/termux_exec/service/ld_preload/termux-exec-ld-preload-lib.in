@@ -18,12 +18,16 @@ case "${TERMUX__PREFIX:-}" in
     /*[!/]) :;; *) TERMUX__PREFIX="@TERMUX__PREFIX@";;
 esac
 
+TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE___N="@TERMUX_ENV__S_TERMUX_EXEC@SYSTEM_LINKER_EXEC__MODE"
+termux_exec__ld_preload_lib__copy_variable TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE "$TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE___N" || return $?
+
 }
 
 
 
-termux_exec__ld_preload_lib__log() { local log_level="${1}"; shift; if [ "$TERMUX_EXEC__LD_PRELOAD_LIB__LOG_LEVEL" -ge "$log_level" ]; then echo "@TERMUX__LNAME@-exec:" "$@"; fi }
+termux_exec__ld_preload_lib__log() { local log_level="${1}"; shift; if [ "$TERMUX_EXEC__LD_PRELOAD_LIB__LOG_LEVEL" -ge "$log_level" ]; then echo "@TERMUX__LNAME@-exec.ld_preload_lib:" "$@"; fi }
 termux_exec__ld_preload_lib__log_error() { echo "@TERMUX__LNAME@-exec:" "$@" 1>&2; }
+termux_exec__ld_preload_lib__log_error_for_level() { local log_level="${1}"; shift; if [ "$TERMUX_EXEC__LD_PRELOAD_LIB__LOG_LEVEL" -ge "$log_level" ]; then echo "@TERMUX__LNAME@-exec.ld_preload_lib:" "$@" 1>&2; fi }
 
 
 
@@ -80,13 +84,99 @@ termux_exec__ld_preload_lib__main() {
 ##
 termux_exec__ld_preload_lib__setup__run_command() {
 
-    local system_linker_exec_enabled
+    local return_value
 
-    system_linker_exec_enabled="$(termux-exec-system-linker-exec is-enabled)" || return $?
+    # Setting of primary Termux `$LD_PRELOAD` library must be done from
+    # perspective of it being loaded from inside a normal Termux owned
+    # shell running inside the Termux app.
+    # It must not be done from the perspective of root user, as the
+    # library file written would be owned by root user instead of
+    # Termux app uid. Similar restrictions are added in Termux apt/dpkg.
+    # Moreover, if the su/shell user is used to drop
+    # privileges/capabilities and uid to an unprivileged user,
+    # like to Termux uid, only the uid may be changed to
+    # Termux uid but the process context may not be switched
+    # to Termux app's normal context, like one of the
+    # `u:r:untrusted_app*` contexts, and so for the current process,
+    # `termux-exec-system-linker-exec should-enable` will wrongly
+    # assume `app_data_file_exec_exempted` as `true` if
+    # `TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE` is parsed as `enable`,
+    # and then `libtermux-exec-direct-ld-preload.so` would wrongly
+    # be set as the primary `$LD_PRELOAD` library instead of
+    # `libtermux-exec-linker-ld-preload.so`, where the direct variant
+    # may not have additional syscall hooks required for a fully
+    # functioning system linker exec environment.
+    # See also `termux_exec__system_linker_exec__should_enable__run_command()`
+    # in `termux-exec-system-linker-exec` and `shouldEnableSystemLinkerExec()`
+    # docs in `TermuxExecLDPreload.c`.
+    # This issue normally wouldn't occur if Termux app exports
+    # `TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force` if app uses
+    # `targetSdkVersion` `>= 28` and when dropping privileges,
+    # `su --preserve-environment` is used or `termux-shell.env` is
+    # sourced in unprivileged shell.
+    # The user could also export `TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE`
+    # variable themselves with a custom value in a shell rc file, which
+    # would affect which library gets set during `termux-exec` package
+    # `postinst` script. The user could manually run the
+    # `termux-exec-ld-preload-lib` command as well, while exporting
+    # a custom variable value.
+    # If Termux packages are supposed to be run/updated from root in a
+    # specialized environment, then patches should be done to remove
+    # `uid = 0` check and only keep `u:r:runas_app:*` condition and
+    # remove other su contexts from case statement below.
+
+    local uid
+    uid="$(id -u)"
+    return_value=$?
+    if [ $return_value -ne 0 ]; then
+        termux_exec__ld_preload_lib__log_error "Failed to get uid while setting primary Termux '\$LD_PRELOAD' library"
+        return $return_value
+    fi
+
+    # Do not allow setting library as root (0) user.
+    # The shell (2000) user is still allowed, as packages may be getting
+    # set up for the `com.android.shell` package with the Termux rootfs
+    # under `/data/local/tmp` for adb usage.
+    if [ "$uid" = "0" ]; then
+        termux_exec__ld_preload_lib__log_error "Cannot set primary Termux '\$LD_PRELOAD' library while running as root (0) user"
+        return 1
+    fi
+
+    local system_linker_exec_mode="${TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE:-}"
+    # The process context check is only done by
+    # `termux_exec__system_linker_exec__should_enable__run_command()`
+    # if `TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE` is parsed as `enable`.
+    if [ "$system_linker_exec_mode" != "disable" ] &&
+        [ "$system_linker_exec_mode" != "force" ] && [ "$system_linker_exec_mode" != "force_all" ]; then
+        local se_process_context
+        if [ "$TERMUX_EXEC__LD_PRELOAD_LIB__LOG_LEVEL" -ge 2 ]; then
+            se_process_context="$(cat "/proc/self/attr/current")" || true
+        else
+            se_process_context="$(cat "/proc/self/attr/current" 2>/dev/null)" || true
+        fi
+        if [ -n "$se_process_context" ]; then
+            termux_exec__ld_preload_lib__log_error_for_level 2 "se_process_context_from_file: '$se_process_context'"
+            case "$se_process_context" in
+                "u:r:runas_app:"*|"u:r:su:s0"|"u:r:ksu:s0"|"u:r:magisk:s0")
+                    termux_exec__ld_preload_lib__log_error "Cannot set primary Termux '\$LD_PRELOAD' library as su/shell user \
+was used to drop privileges/capabilities and uid to an unprivileged user '$uid', \
+but the process context '$se_process_context' was not switched to Termux app's normal context"
+                    termux_exec__ld_preload_lib__log_error "If updating 'termux-exec' package, \
+then do it from a normal shell inside Termux app instead of from inside root or adb/run-as shells"
+                    return 1
+                    ;;
+            esac
+        fi
+    fi
+
+
+    local system_linker_exec_should_enable
+    system_linker_exec_should_enable="$(termux-exec-system-linker-exec should-enable)" || return $?
+
 
     local ld_preload_file
 
-    if [ "$system_linker_exec_enabled" != "true" ]; then
+    if [ "$system_linker_exec_should_enable" != "true" ]; then
         ld_preload_file="$TERMUX__PREFIX/lib/libtermux-exec-direct-ld-preload.so"
     else
         ld_preload_file="$TERMUX__PREFIX/lib/libtermux-exec-linker-ld-preload.so"

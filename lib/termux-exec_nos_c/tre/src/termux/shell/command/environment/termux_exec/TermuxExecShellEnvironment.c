@@ -42,6 +42,8 @@ int termuxExec_systemLinkerExec_mode_get() {
         return 1;
     } else if (strcmp(value, "force") == 0) {
         return 2;
+    } else if (strcmp(value, "force_all") == 0) {
+        return 3;
     }
     return def;
 }

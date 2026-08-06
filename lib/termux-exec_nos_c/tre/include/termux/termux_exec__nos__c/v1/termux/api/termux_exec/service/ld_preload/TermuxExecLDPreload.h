@@ -18,7 +18,7 @@ extern "C" {
 
 
 /**
- * Whether usage of `system_linker_exec` is to be enabled, like to
+ * Whether usage of `system_linker_exec` should be enabled, like to
  * bypass app data file execute restrictions.
  *
  * A call is made to `termuxExec_systemLinkerExec_mode_get()` to
@@ -31,34 +31,56 @@ extern "C" {
  * - `system_linker_exec` is required to bypass app data file execute
  *   restrictions, i.e device is running on Android `>= 10`.
  * - Effective user does not equal root (`0`) and shell (`2000`) user (used for
- *   [`adb`](https://developer.android.com/tools/adb)).
+ *   [`adb`](https://developer.android.com/tools/adb)), as exec
+ *   restrictions do not apply for them.
  * - `TERMUX__SE_PROCESS_CONTEXT` or its fallback `/proc/self/attr/current`
- *    does not start with `PROCESS_CONTEXT_PREFIX__UNTRUSTED_APP_25` and
- *   `PROCESS_CONTEXT_PREFIX__UNTRUSTED_APP_27` for which restrictions
+ *   does not start with
+ *   `PROCESS_CONTEXT_PREFIX__UNTRUSTED_APP_25` (`u:r:untrusted_app_25:`),
+ *   `PROCESS_CONTEXT_PREFIX__UNTRUSTED_APP_27` (`u:r:untrusted_app_27:`) or
+ *   `PROCESS_CONTEXT_PREFIX__RUNAS_APP` (`u:r:runas_app:`), and does not equal
+ *   `PROCESS_CONTEXT__AOSP_SU` (`u:r:su:s0`),
+ *   `PROCESS_CONTEXT__KERNEL_SU` (`u:r:ksu:s0`),
+ *   `PROCESS_CONTEXT__MAGISK_SU` (`u:r:magisk:s0`) or
+ *   `PROCESS_CONTEXT__SHELL` (`u:r:shell:s0`), for which restrictions
  *   are exempted.
  *
  * If `force` is set, then `system_linker_exec` should only be used if:
  * - `system_linker_exec` is supported, i.e device is running on Android `>= 10`.
+ * - Effective user does not equal root (`0`) and shell (`2000`) user (used for
+ *   [`adb`](https://developer.android.com/tools/adb)), as exec
+ *   restrictions do not apply for them.
  * This can be used if running in an untrusted app with `targetSdkVersion` `<= 28`.
+ *
+ * If `force_all` is set, then `system_linker_exec` should only be used if:
+ * - `system_linker_exec` is supported, i.e device is running on Android `>= 10`.
+ * - Effective user is not checked like it is for `force` mode and can
+ *   equal root (`0`) and shell (`2000`) user.
+ * This can be used if running in an untrusted app with `targetSdkVersion` `<= 28`.
+ *
+ * The Termux app should export `force` mode instead of `force_all` mode
+ * in `ENV__TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE` if using
+ * `targetSdkVersion` `> 28` so that system linker exec should be
+ * forcefully engaged. Exporting `force_all` is not recommended as
+ * users running root and shell commands will get a performance hit.
  *
  * See also `shouldEnableSystemLinkerExecForFile()`.
  *
  * **IMPORTANT** The logic must be kept consistent with the
- * `termux_exec__system_linker_exec__enabled__run_command()` function
+ * `termux_exec__system_linker_exec__should_enable__run_command()` function
  * in `termux-exec-system-linker-exec`.
  *
  * @return Returns `0` if `system_linker_exec` is to be enabled, `1` if
  * `system_linker_exec` should not be used, otherwise `-1` on failures.
  */
-int isSystemLinkerExecEnabled();
+int shouldEnableSystemLinkerExec();
 
 /**
  * Whether to use `system_linker_exec` for an executable file, like to
  * bypass app data file execute restrictions.
  *
- * A call is made to `isSystemLinkerExecEnabled()` to check if
- * `system_linker_exec` is to be enabled. If its enabled, then
- * `system_linker_exec` is only to be used if
+ * A call is made to `shouldEnableSystemLinkerExec()` to check
+ * if `system_linker_exec` should be enabled. If it should be enabled,
+ * then `system_linker_exec` is only used if
  * `isPathUnderTermuxAppDataDir()` returns `true` for the
  * `executablePath`.
  *
@@ -73,7 +95,7 @@ int isSystemLinkerExecEnabled();
  * `/data/data/com.android.shell` (and using `force` mode) or
  * compiling packages for `/system` directory.
  *
- * See also `isSystemLinkerExecEnabled()`.
+ * See also `shouldEnableSystemLinkerExec()`.
  *
  * @param executablePath The **normalized** executable or interpreter
  *                        path that will actually be executed.

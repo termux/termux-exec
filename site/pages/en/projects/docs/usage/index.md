@@ -223,7 +223,7 @@ Whether to use [System Linker Exec Solution](../technical.md#system-linker-exec-
 
 **Type:** `string`
 
-**Commits:** [`db738a11`](https://github.com/termux/termux-exec-package/commit/db738a11)
+**Commits:** [`db738a11`](https://github.com/termux/termux-exec-package/commit/db738a11), [`89422f43`](https://github.com/termux/termux-exec-package/commit/89422f43), [`f7450d01`](https://github.com/termux/termux-exec-package/commit/f7450d01)
 
 **Version:** [`>= 2.0.0`](https://github.com/termux/termux-exec-package/releases/tag/v2.0.0)
 
@@ -235,26 +235,38 @@ Whether to use [System Linker Exec Solution](../technical.md#system-linker-exec-
 
 - `enable` - The `system_linker_exec` will be enabled but only if required.
 
-- `force` - The `system_linker_exec` will be force enabled even if not required and is supported.
+- `force` - The `system_linker_exec` will be force enabled even if not required and effective user id does not equal root (`0`) and shell (`2000`).
 
-This is implemented by `isSystemLinkerExecEnabled()` function ([1](https://github.com/termux/termux-exec-package/blob/v2.4.0/lib/termux-exec_nos_c/tre/include/termux/termux_exec__nos__c/v1/termux/api/termux_exec/service/ld_preload/TermuxExecLDPreload.h#L20), [2](https://github.com/termux/termux-exec-package/blob/v2.4.0/lib/termux-exec_nos_c/tre/src/termux/api/termux_exec/service/ld_preload/TermuxExecLDPreload.c#L31)) and `shouldEnableSystemLinkerExecForFile()` function ([1](https://github.com/termux/termux-exec-package/blob/v2.4.0/lib/termux-exec_nos_c/tre/include/termux/termux_exec__nos__c/v1/termux/api/termux_exec/service/ld_preload/TermuxExecLDPreload.h#L55), [2](https://github.com/termux/termux-exec-package/blob/v2.4.0/lib/termux-exec_nos_c/tre/src/termux/api/termux_exec/service/ld_preload/TermuxExecLDPreload.c#L2137)) in `TermuxExecLDPreload.h` and implemented by `TermuxExecLDPreload.c`, and called by [`ExecIntercept.c`](https://github.com/termux/termux-exec-package/blob/v2.4.0/lib/termux-exec_nos_c/tre/src/termux/api/termux_exec/exec/ExecIntercept.c#L216).
+- `force_all` - The `system_linker_exec` will be force enabled even if not required and is supported, regardless of effective user id.
+
+This is implemented by `shouldEnableSystemLinkerExec()` function ([1](https://github.com/termux/termux-exec-package/blob/v2.6.0/lib/termux-exec_nos_c/tre/include/termux/termux_exec__nos__c/v1/termux/api/termux_exec/service/ld_preload/TermuxExecLDPreload.h#L20), [2](https://github.com/termux/termux-exec-package/blob/v2.6.0/lib/termux-exec_nos_c/tre/src/termux/api/termux_exec/service/ld_preload/TermuxExecLDPreload.c#L31)) and `shouldEnableSystemLinkerExecForFile()` function ([1](https://github.com/termux/termux-exec-package/blob/v2.6.0/lib/termux-exec_nos_c/tre/include/termux/termux_exec__nos__c/v1/termux/api/termux_exec/service/ld_preload/TermuxExecLDPreload.h#L61), [2](https://github.com/termux/termux-exec-package/blob/v2.6.0/lib/termux-exec_nos_c/tre/src/termux/api/termux_exec/service/ld_preload/TermuxExecLDPreload.c#L170)) in `TermuxExecLDPreload.h` and implemented by `TermuxExecLDPreload.c`, and called by [`ExecIntercept.c`](https://github.com/termux/termux-exec-package/blob/v2.6.0/lib/termux-exec_nos_c/tre/src/termux/api/termux_exec/service/ld_preload/direct/exec/ExecIntercept.c#L296).
 
 If `disable` is set, then `system_linker_exec` will never be used and the default `direct` execution type will be used.
 
 If `enable` is set, then `system_linker_exec` will only be used if:
 - `system_linker_exec` is required to bypass [App Data File Execute Restrictions](../technical.md#app-data-file-execute-restrictions), i.e device is running on Android `>= 10`.
-- Effective user does not equal root (`0`) and shell (`2000`) user (used for [`adb`](https://developer.android.com/tools/adb)).
-- [`TERMUX__SE_PROCESS_CONTEXT`](#TERMUX__SE_PROCESS_CONTEXT) does not start with `PROCESS_CONTEXT_PREFIX__UNTRUSTED_APP_25` (`u:r:untrusted_app_25:`) and `PROCESS_CONTEXT_PREFIX__UNTRUSTED_APP_27` (`u:r:untrusted_app_27:`) for which restrictions are exempted. For more info on them, check [`SelinuxUtils.h`](https://github.com/termux/termux-core-package/blob/v0.4.0/lib/termux-core_nos_c/tre/include/termux/termux_core__nos__c/v1/unix/os/selinux/SelinuxUtils.h).
+- Effective user does not equal root (`0`) and shell (`2000`) user (used for [`adb`](https://developer.android.com/tools/adb)), as exec restrictions do not apply for them.
+- [`TERMUX__SE_PROCESS_CONTEXT`](#TERMUX__SE_PROCESS_CONTEXT) does not start with `PROCESS_CONTEXT_PREFIX__UNTRUSTED_APP_25` (`u:r:untrusted_app_25:`), `PROCESS_CONTEXT_PREFIX__UNTRUSTED_APP_27` (`u:r:untrusted_app_27:`) or `PROCESS_CONTEXT_PREFIX__RUNAS_APP` (`u:r:runas_app:`), and does not equal `PROCESS_CONTEXT__AOSP_SU` (`u:r:su:s0`), `PROCESS_CONTEXT__KERNEL_SU` (`u:r:ksu:s0`), `PROCESS_CONTEXT__MAGISK_SU` (`u:r:magisk:s0`) or `PROCESS_CONTEXT__SHELL` (`u:r:shell:s0`), for which restrictions are exempted. For more info on them, check [`SelinuxUtils.h`](https://github.com/termux/termux-core-package/blob/v0.4.0/lib/termux-core_nos_c/tre/include/termux/termux_core__nos__c/v1/unix/os/selinux/SelinuxUtils.h).
 - Executable or interpreter path is under [`TERMUX_APP__DATA_DIR`] or [`TERMUX_APP__LEGACY_DATA_DIR`] directory.
 
 If `force` is set, then `system_linker_exec` will only be used if:
 - `system_linker_exec` is supported, i.e device is running on Android `>= 10`.
+- Effective user does not equal root (`0`) and shell (`2000`) user (used for [`adb`](https://developer.android.com/tools/adb)), as exec restrictions do not apply for them.
+- Executable or interpreter path is under [`TERMUX_APP__DATA_DIR`] or [`TERMUX_APP__LEGACY_DATA_DIR`] directory.
+This can be used if running in an untrusted app with `targetSdkVersion` `<= 28`.
+
+If `force_all` is set, then `system_linker_exec` will only be used if:
+- `system_linker_exec` is supported, i.e device is running on Android `>= 10`.
+- Effective user is not checked like it is for `force` mode and can equal root (`0`) and shell (`2000`) user.
 - Executable or interpreter path is under [`TERMUX_APP__DATA_DIR`] or [`TERMUX_APP__LEGACY_DATA_DIR`] directory.
 This can be used if running in an untrusted app with `targetSdkVersion` `<= 28`.
 
 The executable or interpreter paths are checked under [`TERMUX_APP__DATA_DIR`]/[`TERMUX_APP__LEGACY_DATA_DIR`] instead of `TERMUX__ROOTFS` as files could be executed from `TERMUX__APPS_DIR` and `TERMUX__CACHE_DIR`, which are not under the Termux rootfs. Additionally, Termux rootfs may not exist under app data directory at all and could be under another directory under Android rootfs `/`, like if compiling packages for `shell` user for the `com.android.shell` package with the Termux rootfs under `/data/local/tmp` instead of `/data/data/com.android.shell` (and using `force` mode) or compiling packages for `/system` directory.
 
-To get whether `termux-exec` will use `system_linker_exec` at runtime, run the `termux-exec-system-linker-exec is-enabled` command.
+The Termux app should export `force` mode instead of `force_all` mode in `TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE` if using `targetSdkVersion` `> 28` so that system linker exec should be forcefully engaged. Exporting `force_all` is not recommended as users running root and shell commands will get a performance hit.
+
+To get whether `system_linker_exec` is currently enabled in Termux based on current process environment if a Termux app data file were to be executed, run the `termux-exec-system-linker-exec is-enabled` command.
+To get whether `system_linker_exec` should be enabled in Termux based on current process environment regardless of if a Termux app data file were to be executed, run the `termux-exec-system-linker-exec should-enable` command.
 
 ## &nbsp;
 
@@ -316,7 +328,7 @@ So `termux-exec` sets the `TERMUX_EXEC__PROC_SELF_EXE` env variable when `execve
 
 &nbsp;
 
-Note that if `termux-exec` is set in `LD_PRELOAD`, and it sets `TERMUX_EXEC__PROC_SELF_EXE` for the current process/shell, and then `LD_PRELOAD` is unset, then new processes after second nested `exec()` will get old and wrong value of `TERMUX_EXEC__PROC_SELF_EXE` belonging to the first nested process since `termux-exec` will not get called for the second nested process to set the updated value. The `termux-exec` will be called for the first nested process, because just unsetting `LD_PRELOAD` in current process will not unload the `termux-exec` library and it requires at least one nested `exec()`. The `termux-exec` library could unset `TERMUX_EXEC__PROC_SELF_EXE` if `LD_PRELOAD` isn't already set, but then if the first nested process is under [`TERMUX_APP__DATA_DIR`]/[`TERMUX_APP__LEGACY_DATA_DIR`], it will not have access to `TERMUX_EXEC__PROC_SELF_EXE` to read the actual value of the execution command. This would normally not be an issue if `LD_PRELOAD` being set to the `termux-exec` library is mandatory so that it can `system_linker_exec` commands if running with `targetSdkVersion` `>= 29` on an android `>= 10` device, as otherwise permission denied errors would trigger for any command under [`TERMUX_APP__DATA_DIR`]/[`TERMUX_APP__LEGACY_DATA_DIR`] anyways, unless user manually wraps second nested process with `/system/bin/linker64`. This will still be an issue if `system_linker_exec` is optional due to running with an older `targetSdkVersion` or on an older android device and `TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE` is set to `force`, since then `TERMUX_EXEC__PROC_SELF_EXE` would get exported and will be used by termux packages.
+Note that if `termux-exec` is set in `LD_PRELOAD`, and it sets `TERMUX_EXEC__PROC_SELF_EXE` for the current process/shell, and then `LD_PRELOAD` is unset, then new processes after second nested `exec()` will get old and wrong value of `TERMUX_EXEC__PROC_SELF_EXE` belonging to the first nested process since `termux-exec` will not get called for the second nested process to set the updated value. The `termux-exec` will be called for the first nested process, because just unsetting `LD_PRELOAD` in current process will not unload the `termux-exec` library and it requires at least one nested `exec()`. The `termux-exec` library could unset `TERMUX_EXEC__PROC_SELF_EXE` if `LD_PRELOAD` isn't already set, but then if the first nested process is under [`TERMUX_APP__DATA_DIR`]/[`TERMUX_APP__LEGACY_DATA_DIR`], it will not have access to `TERMUX_EXEC__PROC_SELF_EXE` to read the actual value of the execution command. This would normally not be an issue if `LD_PRELOAD` being set to the `termux-exec` library is mandatory so that it can `system_linker_exec` commands if running with `targetSdkVersion` `>= 29` on an android `>= 10` device, as otherwise permission denied errors would trigger for any command under [`TERMUX_APP__DATA_DIR`]/[`TERMUX_APP__LEGACY_DATA_DIR`] anyways, unless user manually wraps second nested process with `/system/bin/linker64`. This will still be an issue if `system_linker_exec` is optional due to running with an older `targetSdkVersion` or on an older android device and `TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE` is set to `force`/`force_all`, since then `TERMUX_EXEC__PROC_SELF_EXE` would get exported and will be used by termux packages.
 
 **To prevent issues, if `LD_PRELOAD` is unset in current process, then `TERMUX_EXEC__PROC_SELF_EXE` must also be unset in the first nested process by the user themselves.** For example, running following will echo `<TERMUX__PREFIX>/bin/sh` value twice instead of `<TERMUX__PREFIX>/bin/sh` first and `<TERMUX__PREFIX>/bin/dash` second if `LD_PRELOAD` were to be set.
 
